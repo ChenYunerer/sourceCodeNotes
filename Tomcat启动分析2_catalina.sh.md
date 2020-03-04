@@ -641,7 +641,7 @@ elif [ "$1" = "version" ] ; then
       org.apache.catalina.util.ServerInfo
 
 else
-
+# 没有匹配任何命令 默认打印提示信息
   echo "Usage: catalina.sh ( commands ... )"
   echo "commands:"
   if $os400; then
