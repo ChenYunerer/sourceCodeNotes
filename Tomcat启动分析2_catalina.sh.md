@@ -356,9 +356,12 @@ if [ "$1" = "jpda" ] ; then
     JPDA_OPTS="-agentlib:jdwp=transport=$JPDA_TRANSPORT,address=$JPDA_ADDRESS,server=y,suspend=$JPDA_SUSPEND"
   fi
   CATALINA_OPTS="$JPDA_OPTS $CATALINA_OPTS"
+  # shift用于移动$指向的参数位置 $1本来指向第一个参数 shift一次 $1变为指向第二个参数
   shift
 fi
 
+# debug模式启动tomcat 使用_RUNJDB执行org.apache.catalina.startup.Bootstrap
+# _RUNJDB变量在setclasspath.sh当中已经设置成了JAVA_HOME/bin/jdb
 if [ "$1" = "debug" ] ; then
   if $os400; then
     echo "Debug command not available on OS400"
@@ -390,6 +393,9 @@ if [ "$1" = "debug" ] ; then
     fi
   fi
 
+# start模式启动tomcat 使用_RUNJAVA执行org.apache.catalina.startup.Bootstrap
+# _RUNJAVA变量在setclasspath.sh当中已经设置成了JRE_HOME/bin/java
+# 与run启动tomcat不同的是，start会根据nohup配置确认是否nohup启动，并且将输出log输出到CATALINA_OUT，而run则会打印在终端上
 elif [ "$1" = "run" ]; then
 
   shift
@@ -415,6 +421,9 @@ elif [ "$1" = "run" ]; then
       org.apache.catalina.startup.Bootstrap "$@" start
   fi
 
+# start模式启动tomcat 使用_RUNJAVA执行org.apache.catalina.startup.Bootstrap
+# _RUNJAVA变量在setclasspath.sh当中已经设置成了JRE_HOME/bin/java
+# 与run启动tomcat不同的是，start会根据nohup配置确认是否nohup启动，并且将输出log输出到CATALINA_OUT，而run则会打印在终端上
 elif [ "$1" = "start" ] ; then
 
   if [ ! -z "$CATALINA_PID" ]; then
