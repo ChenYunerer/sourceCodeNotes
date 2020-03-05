@@ -1,4 +1,4 @@
-##Tomcat8.5.9启动流程分析1
+## Tomcat8.5.9启动流程分析1
 
 ### startup.sh 脚本
 
@@ -76,7 +76,13 @@ fi
 exec "$PRGDIR"/"$EXECUTABLE" start "$@"
 
 ```
+其实类似于startup.sh，shutdown.sh、configtest.sh以及version.sh都是一样的：
+1. 先对OS400操作系统进行判断
+2. 获取执行脚本的源文件
+3. 通过源文件获取到同目录下的catalina.sh脚本
+4. 执行catalina.sh脚本，附带不同的参数，比如start、shutdown、configtest以及version指令都是由catalina.sh脚本来执行具体的逻辑
 
+### IF常用判断速查
 |  if判断   |  为ture的条件  |
 | :-------: | :--------------: |
 |  -r FILE  |  文件存在且可读  |
