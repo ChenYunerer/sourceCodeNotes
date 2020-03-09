@@ -425,36 +425,47 @@ elif [ "$1" = "run" ]; then
 # _RUNJAVA变量在setclasspath.sh当中已经设置成了JRE_HOME/bin/java
 # 与run启动tomcat不同的是，start会根据nohup配置确认是否nohup启动，并且将输出log输出到CATALINA_OUT，而run则会打印在终端上
 elif [ "$1" = "start" ] ; then
-
+  #对PIDFILE进行处理
+  #判断CATALINA_PID配置项是否为空
   if [ ! -z "$CATALINA_PID" ]; then
+  	#判断CATALINA_PID配置的文件是否存在
     if [ -f "$CATALINA_PID" ]; then
+      #判断CATALINA_PID配置的文件是否存在且非空
       if [ -s "$CATALINA_PID" ]; then
         echo "Existing PID file found during start."
+        #判断CATALINA_PID文件是否可读
         if [ -r "$CATALINA_PID" ]; then
+          #读取PID并判断该PID是否有进程使用
           PID=`cat "$CATALINA_PID"`
           ps -p $PID >/dev/null 2>&1
           if [ $? -eq 0 ] ; then
+            #$?获取上个命令\函数的返回值
             echo "Tomcat appears to still be running with PID $PID. Start aborted."
             echo "If the following process is not a Tomcat process, remove the PID file and try again:"
             ps -f -p $PID
             exit 1
           else
             echo "Removing/clearing stale PID file."
+            #删除CATALINA_PID文件
             rm -f "$CATALINA_PID" >/dev/null 2>&1
             if [ $? != 0 ]; then
               if [ -w "$CATALINA_PID" ]; then
+                #如果CATALINA_PID文件可写则置空
                 cat /dev/null > "$CATALINA_PID"
               else
+              	#CATALINA_PID存在且非空 删除失败 且没有写入权限 否则结束运行
                 echo "Unable to remove or clear stale PID file. Start aborted."
                 exit 1
               fi
             fi
           fi
         else
+          #CATALINA_PID存在非空且不可读 否则结束运行
           echo "Unable to read PID file. Start aborted."
           exit 1
         fi
       else
+      	#如果CATALINA_PID存在且为空 则尝试删除 如果删除失败 判断是否有写入权限 否则结束运行
         rm -f "$CATALINA_PID" >/dev/null 2>&1
         if [ $? != 0 ]; then
           if [ ! -w "$CATALINA_PID" ]; then
@@ -493,7 +504,7 @@ elif [ "$1" = "start" ] ; then
       >> "$CATALINA_OUT" 2>&1 "&"
 
   fi
-
+  #写入PID到PIDFILE
   if [ ! -z "$CATALINA_PID" ]; then
     echo $! > "$CATALINA_PID"
   fi
