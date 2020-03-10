@@ -320,7 +320,7 @@ fi
 
 # ----- Execute The Requested Command -----------------------------------------
 # 以下所有内容都在根据不同命令来执行不同动作
-# start run debug 以不同方式启动tomcat
+# start run debug stop以不同方式启动tomcat
 # configtest 测试配置
 # version 打印版本信息
 # 如果都没有匹配则打印提示信息
@@ -510,7 +510,7 @@ elif [ "$1" = "start" ] ; then
   fi
 
   echo "Tomcat started."
-
+#对stop命令做处理
 elif [ "$1" = "stop" ] ; then
 
   shift
@@ -529,7 +529,7 @@ elif [ "$1" = "stop" ] ; then
     shift
     FORCE=1
   fi
-
+  #如果存在PID则通过kill -0判断该PID是否存在
   if [ ! -z "$CATALINA_PID" ]; then
     if [ -f "$CATALINA_PID" ]; then
       if [ -s "$CATALINA_PID" ]; then
@@ -555,6 +555,7 @@ elif [ "$1" = "stop" ] ; then
     org.apache.catalina.startup.Bootstrap "$@" stop
 
   # stop failed. Shutdown port disabled? Try a normal kill.
+  # stop失败 则通过kill -15杀死进程
   if [ $? != 0 ]; then
     if [ ! -z "$CATALINA_PID" ]; then
       echo "The stop command failed. Attempting to signal the process to stop through OS signal."
@@ -562,6 +563,8 @@ elif [ "$1" = "stop" ] ; then
     fi
   fi
 
+  #在一定SLEEP时间内判断PID进程是否已经结束 如果结束则清空PIDFILE 否则打印JAVA堆栈信息
+  #kill -3 PID 打印JAVA堆栈信息 1 如果项目通过Tomcat进行发布 则对应的堆栈信息会打印在 catalina.out文件中 2 如果项目是基于SpringBoot并且使用nohup java -jar xxx.jar & 命令运行，则java堆栈信息会在对应的nohup.out文件中
   if [ ! -z "$CATALINA_PID" ]; then
     if [ -f "$CATALINA_PID" ]; then
       while [ $SLEEP -ge 0 ]; do
@@ -595,7 +598,7 @@ elif [ "$1" = "stop" ] ; then
       done
     fi
   fi
-
+  #到这一步程序没有停止运行则尝试使用kill -9杀死进程
   KILL_SLEEP_INTERVAL=5
   if [ $FORCE -eq 1 ]; then
     if [ -z "$CATALINA_PID" ]; then
@@ -678,8 +681,10 @@ else
 
 fi
 
-
 ```
+### 结束tomcat进程流程
+
+脚本对tomcat进程的结束处理的比较优雅，先是通过PID判断进程是否存在，存在进程则先通过java程序内部来结束进程，如果停止失败再使用kill -15来停止进程，如果还结束进程失败，最后通过kill -9杀死进程
 
 |  if判断   |      为ture的条件      |
 | :-------: | :--------------------: |
