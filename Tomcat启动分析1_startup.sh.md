@@ -82,6 +82,10 @@ exec "$PRGDIR"/"$EXECUTABLE" start "$@"
 3. 通过源文件获取到同目录下的catalina.sh脚本
 4. 执行catalina.sh脚本，附带不同的参数，比如start、shutdown、configtest以及version指令都是由catalina.sh脚本来执行具体的逻辑
 
+为什么需要进行源文件的判断？
+
+​	因为需要执行源路径下的catalina.sh脚本，如果用户是通过链接文件执行的脚本，则该用户的链接文件同级目录几乎不可能存在catalina.sh脚本，所以需要获取源文件路径，catalina.sh脚本中也同样需要获取源文件路径，同理。
+
 ### IF常用判断速查
 |  if判断   |  为ture的条件  |
 | :-------: | :--------------: |
