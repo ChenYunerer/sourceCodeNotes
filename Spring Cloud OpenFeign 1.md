@@ -1,4 +1,4 @@
-## Spring Cloud OpenFeign源码笔记
+## Spring Cloud OpenFeign源码笔记1
 
 openFeign 存在2个配置文件，分别FeignClientProperties.class FeignHttpClientProperties.class
 
@@ -286,7 +286,7 @@ public Object getObject() throws Exception {
 
 关键步骤：
 
-1. 构建Feign.Builder（存在种实现：默认的Feign.Builder以及HystrixFeign.Builder），主要对Feign.Builder设置logger encoder decoder contract interceptors等（具体配置流程之后有空再看，再补充）
+1. 构建Feign.Builder（存在种实现：默认的Feign.Builder以及HystrixFeign.Builder），主要对Feign.Builder设置logger encoder decoder contract interceptors等（具体配置流程之后有空再看，再补充）默认的Decoder和Encoder由FeignClientsConfiguration构建
 2. 对于url的处理：如果没有指定url，则通过name+path设置url，由url则对url进行http前缀处理
 3. 对于没有指定url的情况，一定是通过服务治理的方式寻址，涉及到负载均衡，通过loadBalance()方法构建对应的FeignClient
 4. 对于普通的存在url的情况，默认构建对应的FeignClient，两种情况存在url和不存在url其实区别主要在于对FeignClient设置的Client不同，一种是TraceLoadBalancerFeignClient一种是Default也有可能是OkHttpClient、ApacheHttpClient
