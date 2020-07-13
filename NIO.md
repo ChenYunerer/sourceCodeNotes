@@ -259,7 +259,3 @@ Connector -> ProtocolHandler : protocolHandler.start();
 ProtocolHandler -> EndPoint : endpoint.start();
 ```
 
-#### Tomcat对于请求的处理
-
- 
-
