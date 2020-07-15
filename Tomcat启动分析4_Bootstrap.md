@@ -261,5 +261,142 @@ ProtocolHandler -> EndPoint : endpoint.start();
 
 #### Tomcat对于请求的处理
 
- 
+```sequence
+Endpoint -> Endpoint: initializeConnectionLatch
+Endpoint -> Poller: start Pollers
+Poller -> Poller: run(): 循环获取同步队列中的PollerEvent,并注册NIO事件，对事件进行select
+Poller -> SocketProcessor:Poller监听到OP_READ OP_WRITE 事件后 交由SocketProcessor来做处理
+SocketProcessor -> ConnectionHandler: SocketProcessor将对象再次交给ConnectionHandler
+ConnectionHandler -> ProtocolHandler:ConnectionHandler对针对不同的协议将请求交予不同的ProtocolHandler协议处理器处理todo
+Endpoint -> Acceptor: start Acceptors
+Acceptor -> Acceptor: run(): 循环监听socket accept请求
+Acceptor --> Poller: 接收到请求将请求封装成PollerEvent加入Poller中的Event同步队列
+```
 
+
+
+ Endpoint startInternal:
+
+```java
+NioEndpoint.class
+@Override
+public void startInternal() throws Exception {
+
+    if (!running) {
+        running = true;
+        paused = false;
+
+        processorCache = new SynchronizedStack<>(SynchronizedStack.DEFAULT_SIZE,
+                socketProperties.getProcessorCache());
+        eventCache = new SynchronizedStack<>(SynchronizedStack.DEFAULT_SIZE,
+                        socketProperties.getEventCache());
+        nioChannels = new SynchronizedStack<>(SynchronizedStack.DEFAULT_SIZE,
+                socketProperties.getBufferPool());
+
+        // Create worker collection
+        if ( getExecutor() == null ) {
+            createExecutor();
+        }
+      //初始化连接Latch 用于限制连接数量 默认1000
+        initializeConnectionLatch();
+
+        // Start poller threads
+      //启动多个Poller
+        pollers = new Poller[getPollerThreadCount()];
+        for (int i=0; i<pollers.length; i++) {
+            pollers[i] = new Poller();
+            Thread pollerThread = new Thread(pollers[i], getName() + "-ClientPoller-"+i);
+            pollerThread.setPriority(threadPriority);
+            pollerThread.setDaemon(true);
+            pollerThread.start();
+        }
+      //开启Acceptor线程用于监听请求连接
+        startAcceptorThreads();
+    }
+}
+
+AbstractEndpoint.class
+protected final void startAcceptorThreads() {
+        int count = getAcceptorThreadCount();
+        acceptors = new Acceptor[count];
+
+        for (int i = 0; i < count; i++) {
+            acceptors[i] = createAcceptor();
+            String threadName = getName() + "-Acceptor-" + i;
+            acceptors[i].setThreadName(threadName);
+          //启动Acceptor线程
+            Thread t = new Thread(acceptors[i], threadName);
+            t.setPriority(getAcceptorThreadPriority());
+            t.setDaemon(getDaemon());
+            t.start();
+        }
+    }
+```
+
+Acceptor线程启动后，开启循环监听socket连接，在监听前会计算连接数量，如果超过连接数量则进行等待，获取到SocketChannel之后通过setSocketOptions将SocketChannel根据是否开启SSL进行封装构建SecureNioChannel、NioChannel，在将该Channel注册到Poller中
+
+注册过程中又将NioChannel进行包裹NioSocketWrapper进而构建PollerEvent，添加到Poller的同步队列（SynchronizedQueue<PollerEvent> events）当中去
+
+```java
+public void register(final NioChannel socket) {
+    socket.setPoller(this);
+    NioSocketWrapper ka = new NioSocketWrapper(socket, NioEndpoint.this);
+    socket.setSocketWrapper(ka);
+    ka.setPoller(this);
+    ka.setReadTimeout(getSocketProperties().getSoTimeout());
+    ka.setWriteTimeout(getSocketProperties().getSoTimeout());
+    ka.setKeepAliveLeft(NioEndpoint.this.getMaxKeepAliveRequests());
+    ka.setSecure(isSSLEnabled());
+    ka.setReadTimeout(getSoTimeout());
+    ka.setWriteTimeout(getSoTimeout());
+    PollerEvent r = eventCache.pop();
+    ka.interestOps(SelectionKey.OP_READ);//this is what OP_REGISTER turns into.
+    if ( r==null) r = new PollerEvent(socket,ka,OP_REGISTER);
+    else r.reset(socket,ka,OP_REGISTER);
+    addEvent(r);
+}
+```
+
+Poller线程启动后会循环从events队列中获取PollerEvent并调用其run方法，在该方法中进行事件注册SelectionKey.OP_READ事件，然后进行selector.selectedKeys()获取SelectionKey对SelectionKey进行逐一处理调用processKey对不同的Key进行处理：
+
+1. processSendfile() 处理文件
+2. processSocket(attachment, SocketEvent.OPEN_READ, true) 处理OP_READ
+3. processSocket(attachment, SocketEvent.OPEN_WRITE, true) 处理OP_WRITE
+
+具体的执行由SocketProcessor进行处理
+
+```java
+AbstractEndpoint.SocketProcessor.class
+public boolean processSocket(SocketWrapperBase<S> socketWrapper,
+        SocketEvent event, boolean dispatch) {
+    try {
+        if (socketWrapper == null) {
+            return false;
+        }
+      //构建SocketProcessorBase 没有则进行创建
+        SocketProcessorBase<S> sc = processorCache.pop();
+        if (sc == null) {
+            sc = createSocketProcessor(socketWrapper, event);
+        } else {
+            sc.reset(socketWrapper, event);
+        }
+      //通过Executor进行执行
+        Executor executor = getExecutor();
+        if (dispatch && executor != null) {
+            executor.execute(sc);
+        } else {
+            sc.run();
+        }
+    } catch (RejectedExecutionException ree) {
+        getLog().warn(sm.getString("endpoint.executor.fail", socketWrapper) , ree);
+        return false;
+    } catch (Throwable t) {
+        ExceptionUtils.handleThrowable(t);
+        // This means we got an OOM or similar creating a thread, or that
+        // the pool and its queue are full
+        getLog().error(sm.getString("endpoint.process.fail"), t);
+        return false;
+    }
+    return true;
+}
+```
