@@ -172,15 +172,12 @@ try {
 
 ```sequence
 title:初始化流程
-#@startuml
 Server -> Service: init Service
-Service --> Engine: init Engine
-Service --> Executor: init Executor
-Service --> Connector: init Connector
-Connector --> ProtocolHandler: init ProtocolHandler
-ProtocolHandler --> EndPoint: init EndPoint
-
-#@enduml
+Service -> Engine: init Engine
+Service -> Executor: init Executor
+Service -> Connector: init Connector
+Connector -> ProtocolHandler: init ProtocolHandler
+ProtocolHandler -> EndPoint: init EndPoint
 ```
 
 #### Catalina start
@@ -262,18 +259,41 @@ ProtocolHandler -> EndPoint : endpoint.start();
 #### Tomcat对于请求的处理
 
 ```sequence
+title: Endpoint
 Endpoint -> Endpoint: initializeConnectionLatch
 Endpoint -> Poller: start Pollers
 Poller -> Poller: run(): 循环获取同步队列中的PollerEvent,并注册NIO事件，对事件进行select
-Poller -> SocketProcessor:Poller监听到OP_READ OP_WRITE 事件后 交由SocketProcessor来做处理
-SocketProcessor -> ConnectionHandler: SocketProcessor将对象再次交给ConnectionHandler
-ConnectionHandler -> ProtocolHandler:ConnectionHandler对针对不同的协议将请求交予不同的ProtocolHandler协议处理器处理todo
+
 Endpoint -> Acceptor: start Acceptors
 Acceptor -> Acceptor: run(): 循环监听socket accept请求
 Acceptor --> Poller: 接收到请求将请求封装成PollerEvent加入Poller中的Event同步队列
 ```
 
+```sequence
+title: Poller
+Poller -> SocketProcessor:Poller\n监听到OP_READ OP_WRITE 事件后\n交由SocketProcessor处理
+SocketProcessor -> ConnectionHandler: SocketProcessor\n将对象再次交给\nConnectionHandler
+ConnectionHandler -> ProtocolHandler:ConnectionHandler\n构建Processor
+ProtocolHandler -> Processor: create Processor
+Processor -> Processor: process()\nservice()
+Processor -> Adapter: getAdapter()\n.service(request, response)
+Adapter -> Adapter: 构建\nrequest\nresponse
+Adapter -> Pipeline: 
+Pipeline -> Pipeline: invode Valve
+Pipeline -> Pipeline: invode Valve
+Pipeline -> Pipeline: invode Valve \n ....
+Pipeline -> Pipeline: invode StandardWrapperValve \n ....
 
+```
+
+```sequence
+title: StandardWrapperValve invoke
+StandardWrapperValve -> StandardWrapperValve: servlet = wrapper.allocate(); \n 构建servlet实例
+StandardWrapperValve -> StandardWrapperValve: ApplicationFilterFactory\n.createFilterChain(request, wrapper, servlet);
+StandardWrapperValve -> ApplicationFilterChain:filterChain.doFilter(xxx);
+ApplicationFilterChain -> Servlet: servlet.service(request, response);
+Servlet -> Servlet: dispathServlet()
+```
 
  Endpoint startInternal:
 
@@ -400,3 +420,5 @@ public boolean processSocket(SocketWrapperBase<S> socketWrapper,
     return true;
 }
 ```
+
+接下来代码量太多了，不贴代码了......
