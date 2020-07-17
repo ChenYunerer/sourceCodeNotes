@@ -174,18 +174,6 @@ public void registerFeignClients(AnnotationMetadata metadata,
    }
 }
 ```
-### Buffer（缓冲区）对应的实现有：ByteBuffer CharBuffer DoubleBuffer MappedByteBuffer 等
-
-主要步骤：
-### Selector（数据通道事件轮询器）：处理多个Channel，select()方法会一直阻塞到某个注册的通道有事件就绪，直到收到某个通道的事件，则进行对应的处理
-
-1. 通过scanner扫描FeignClient注解，获取注解的AnnotationMetadata进一步获取注解参数
-2. 注册@FeignClient所指定的configuration
-3. 使用@FeignClient注解的name注入FeignClient BeanDefinition
-
-对于上述2步骤：
-#### TCP Example
-
 ```java
 private void registerFeignClient(BeanDefinitionRegistry registry,
       AnnotationMetadata annotationMetadata, Map<String, Object> attributes) {
@@ -219,40 +207,6 @@ private void registerFeignClient(BeanDefinitionRegistry registry,
          new String[] { alias });
    BeanDefinitionReaderUtils.registerBeanDefinition(holder, registry);
 }
-public static void clientCode(){
-        ByteBuffer buffer = ByteBuffer.allocate(1024);
-        SocketChannel socketChannel = null;
-        try{
-            socketChannel = SocketChannel.open();
-            socketChannel.configureBlocking(false);
-            socketChannel.connect(new InetSocketAddress("ip",port));
-            if(socketChannel.finishConnect()){
-                int i=0;
-                while(true){
-                    TimeUnit.SECONDS.sleep(1);
-                    String info = "I'm "+i+++"-th information from client";
-                    buffer.clear();
-                    buffer.put(info.getBytes());
-                    buffer.flip();
-                    while(buffer.hasRemaining()){
-                        System.out.println(buffer);
-                        socketChannel.write(buffer);
-                    }
-                }
-            }
-        }
-        catch (IOException | InterruptedException e){
-            e.printStackTrace();
-        } finally{
-            try{
-                if(socketChannel!=null){
-                    socketChannel.close();
-                }
-            }catch(IOException e){
-                e.printStackTrace();
-            }
-        }
-    }
 ```
 
 注入FeignClientFactoryBean BeanDefinition并为其设置url path name等@FeignClient注解配置的参数
