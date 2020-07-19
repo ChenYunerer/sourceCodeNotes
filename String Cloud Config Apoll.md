@@ -1,7 +1,0 @@
-## Spring Cloud Discovery
-
-
-
-
-
-
