@@ -92,6 +92,8 @@ NacosDiscoveryClient实现了Spring DiscoveryClient接口
 
 具体的寻址由NacosServiceDiscovery来处理
 
+##### Pull
+
 ```sequence
 NacosDiscoveryClient -> NacosServiceDiscovery: getInstances()
 NacosServiceDiscovery -> NamingService: selectInstances()
@@ -106,6 +108,16 @@ HostReactor -> UpdateTask: start UpdateTask: 每隔一定时间向nacos服务请
 简单来说：
 
 1. 从本地缓存尝试获取服务信息
-2. 如果本地没有该服务信息，则发送http请求向nacos服务请求该服务信息
+2. 如果本地没有该服务信息，则发送http请求向nacos服务请求该服务信息（请求的时候会带上client的ip和udp port）
 3. 对于nacos返回的服务信息进行本地缓存，缓存到内存Map以及硬盘
-4. 开启定时任务对本地的服务信息进行定时更新：从nacos服务端获取最新的服务信息更新到本地缓存
+4. 开启定时任务UpdateTask对本地的服务信息进行定时更新：从nacos服务端获取最新的服务信息更新到本地缓存
+
+#####  Push
+
+1. 从pull的模式看，在http请求服务信息的时候，会带上client的ip和udp port，表示对该serverName的订阅
+2. 当该服务发生变动的时候，nacos server会把服务的最新数据通过udp发送给所有的订阅者
+3. UpdateTask再次执行的时候，发现服务数据已经通过push更新之后，就不会再次pull更新，但是依旧发送http请求，但不处理返回
+
+这里有个疑问：为什么“UpdateTask再次执行的时候，发现服务数据已经通过push更新之后，就不会再次pull更新，但是依旧发送http请求”
+
+我猜测是由于，对服务的订阅是通过UDP订阅的，订阅者下线之后nacos server并不知道，所以http的订阅只生效一次（或是一段时间，避免无效的推送数据），因此UpdateTask需要再次通过http请求去订阅，而不用再处理返回了
