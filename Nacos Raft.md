@@ -1,6 +1,9 @@
 # Nacos Raft算法
 
+# Raft部分
+
 ## 角色
+
 Raft分为三种角色：
 
 1. LEADER： 向其他所有节点发送心跳，并负责集群内的数据“写”
@@ -44,6 +47,7 @@ RaftCore HeartBeat.calss
         }
 ```
 ```java
+RaftCore HeartBeat.calss
 private void sendBeat() throws IOException, InterruptedException {
         RaftPeer local = peers.local();
     	//如果集群是单节点启动或是当前节点并非Leader节点则不发起心跳
@@ -145,6 +149,7 @@ private void sendBeat() throws IOException, InterruptedException {
 ```
 
 ```java
+RaftCore HeartBeat.calss
 public RaftPeer receivedBeat(JsonNode beat) throws Exception {
     //解析心跳数据
     final RaftPeer local = peers.local();
@@ -163,7 +168,7 @@ public RaftPeer receivedBeat(JsonNode beat) throws Exception {
         throw new IllegalArgumentException("invalid state from master, state: " + remote.state);
     }
     
-    //如果轮次
+    //如果轮次低于本地记录的轮次则不处理
     if (local.term.get() > remote.term.get()) {
         Loggers.RAFT
                 .info("[RAFT] out of date beat, beat-from-term: {}, beat-to-term: {}, remote peer: {}, and leaderDueMs: {}",
@@ -172,6 +177,7 @@ public RaftPeer receivedBeat(JsonNode beat) throws Exception {
                 "out of date beat, beat-from-term: " + remote.term.get() + ", beat-to-term: " + local.term.get());
     }
     
+   //如果本节点不是Follower节点，则切换到Follower模式，并且为该节点投票
     if (local.state != RaftPeer.State.FOLLOWER) {
         
         Loggers.RAFT.info("[RAFT] make remote as leader, remote peer: {}", JacksonUtils.toJson(remote));
@@ -183,179 +189,10 @@ public RaftPeer receivedBeat(JsonNode beat) throws Exception {
     final JsonNode beatDatums = beat.get("datums");
     local.resetLeaderDue();
     local.resetHeartbeatDue();
-    
+    //设置Leader
     peers.makeLeader(remote);
-    
-    if (!switchDomain.isSendBeatOnly()) {
-        
-        Map<String, Integer> receivedKeysMap = new HashMap<>(datums.size());
-        
-        for (Map.Entry<String, Datum> entry : datums.entrySet()) {
-            receivedKeysMap.put(entry.getKey(), 0);
-        }
-        
-        // now check datums
-        List<String> batch = new ArrayList<>();
-        
-        int processedCount = 0;
-        if (Loggers.RAFT.isDebugEnabled()) {
-            Loggers.RAFT
-                    .debug("[RAFT] received beat with {} keys, RaftCore.datums' size is {}, remote server: {}, term: {}, local term: {}",
-                            beatDatums.size(), datums.size(), remote.ip, remote.term, local.term);
-        }
-        for (Object object : beatDatums) {
-            processedCount = processedCount + 1;
-            
-            JsonNode entry = (JsonNode) object;
-            String key = entry.get("key").asText();
-            final String datumKey;
-            
-            if (KeyBuilder.matchServiceMetaKey(key)) {
-                datumKey = KeyBuilder.detailServiceMetaKey(key);
-            } else if (KeyBuilder.matchInstanceListKey(key)) {
-                datumKey = KeyBuilder.detailInstanceListkey(key);
-            } else {
-                // ignore corrupted key:
-                continue;
-            }
-            
-            long timestamp = entry.get("timestamp").asLong();
-            
-            receivedKeysMap.put(datumKey, 1);
-            
-            try {
-                if (datums.containsKey(datumKey) && datums.get(datumKey).timestamp.get() >= timestamp
-                        && processedCount < beatDatums.size()) {
-                    continue;
-                }
-                
-                if (!(datums.containsKey(datumKey) && datums.get(datumKey).timestamp.get() >= timestamp)) {
-                    batch.add(datumKey);
-                }
-                
-                if (batch.size() < 50 && processedCount < beatDatums.size()) {
-                    continue;
-                }
-                
-                String keys = StringUtils.join(batch, ",");
-                
-                if (batch.size() <= 0) {
-                    continue;
-                }
-                
-                Loggers.RAFT.info("get datums from leader: {}, batch size is {}, processedCount is {}"
-                                + ", datums' size is {}, RaftCore.datums' size is {}", getLeader().ip, batch.size(),
-                        processedCount, beatDatums.size(), datums.size());
-                
-                // update datum entry
-                String url = buildUrl(remote.ip, API_GET) + "?keys=" + URLEncoder.encode(keys, "UTF-8");
-                HttpClient.asyncHttpGet(url, null, null, new AsyncCompletionHandler<Integer>() {
-                    @Override
-                    public Integer onCompleted(Response response) throws Exception {
-                        if (response.getStatusCode() != HttpURLConnection.HTTP_OK) {
-                            return 1;
-                        }
-                        
-                        List<JsonNode> datumList = JacksonUtils
-                                .toObj(response.getResponseBody(), new TypeReference<List<JsonNode>>() {
-                                });
-                        
-                        for (JsonNode datumJson : datumList) {
-                            Datum newDatum = null;
-                            OPERATE_LOCK.lock();
-                            try {
-                                
-                                Datum oldDatum = getDatum(datumJson.get("key").asText());
-                                
-                                if (oldDatum != null && datumJson.get("timestamp").asLong() <= oldDatum.timestamp
-                                        .get()) {
-                                    Loggers.RAFT
-                                            .info("[NACOS-RAFT] timestamp is smaller than that of mine, key: {}, remote: {}, local: {}",
-                                                    datumJson.get("key").asText(),
-                                                    datumJson.get("timestamp").asLong(), oldDatum.timestamp);
-                                    continue;
-                                }
-                                
-                                if (KeyBuilder.matchServiceMetaKey(datumJson.get("key").asText())) {
-                                    Datum<Service> serviceDatum = new Datum<>();
-                                    serviceDatum.key = datumJson.get("key").asText();
-                                    serviceDatum.timestamp.set(datumJson.get("timestamp").asLong());
-                                    serviceDatum.value = JacksonUtils
-                                            .toObj(datumJson.get("value").toString(), Service.class);
-                                    newDatum = serviceDatum;
-                                }
-                                
-                                if (KeyBuilder.matchInstanceListKey(datumJson.get("key").asText())) {
-                                    Datum<Instances> instancesDatum = new Datum<>();
-                                    instancesDatum.key = datumJson.get("key").asText();
-                                    instancesDatum.timestamp.set(datumJson.get("timestamp").asLong());
-                                    instancesDatum.value = JacksonUtils
-                                            .toObj(datumJson.get("value").toString(), Instances.class);
-                                    newDatum = instancesDatum;
-                                }
-                                
-                                if (newDatum == null || newDatum.value == null) {
-                                    Loggers.RAFT.error("receive null datum: {}", datumJson);
-                                    continue;
-                                }
-                                
-                                raftStore.write(newDatum);
-                                
-                                datums.put(newDatum.key, newDatum);
-                                notifier.addTask(newDatum.key, ApplyAction.CHANGE);
-                                
-                                local.resetLeaderDue();
-                                
-                                if (local.term.get() + 100 > remote.term.get()) {
-                                    getLeader().term.set(remote.term.get());
-                                    local.term.set(getLeader().term.get());
-                                } else {
-                                    local.term.addAndGet(100);
-                                }
-                                
-                                raftStore.updateTerm(local.term.get());
-                                
-                                Loggers.RAFT.info("data updated, key: {}, timestamp: {}, from {}, local term: {}",
-                                        newDatum.key, newDatum.timestamp, JacksonUtils.toJson(remote), local.term);
-                                
-                            } catch (Throwable e) {
-                                Loggers.RAFT
-                                        .error("[RAFT-BEAT] failed to sync datum from leader, datum: {}", newDatum,
-                                                e);
-                            } finally {
-                                OPERATE_LOCK.unlock();
-                            }
-                        }
-                        TimeUnit.MILLISECONDS.sleep(200);
-                        return 0;
-                    }
-                });
-                
-                batch.clear();
-                
-            } catch (Exception e) {
-                Loggers.RAFT.error("[NACOS-RAFT] failed to handle beat entry, key: {}", datumKey);
-            }
-            
-        }
-        
-        List<String> deadKeys = new ArrayList<>();
-        for (Map.Entry<String, Integer> entry : receivedKeysMap.entrySet()) {
-            if (entry.getValue() == 0) {
-                deadKeys.add(entry.getKey());
-            }
-        }
-        
-        for (String deadKey : deadKeys) {
-            try {
-                deleteDatum(deadKey);
-            } catch (Exception e) {
-                Loggers.RAFT.error("[NACOS-RAFT] failed to remove entry, key={} {}", deadKey, e);
-            }
-        }
-        
-    }
-    
+   //如果并非单纯的心跳，如果包含数据的话，则对数据进行处理
+    ......
     return local;
 }
 ```
@@ -367,7 +204,217 @@ public RaftPeer receivedBeat(JsonNode beat) throws Exception {
 3. 判断当前节点身份是否是Leader且非Standalone模式，否则不发起心跳
 4. 封装心跳数据，有可能尝试携带Instance数据
 5. 通过Http协议向所有集群中的其他节点发送心跳数据
-6. Follower接收到心跳
+6. Follower接收到心跳则设置Leader为该节点，并设置自己为Follower，并重制LeaderDue和HeartbeatDue
 
 ## 选主
 
+RaftCore init方法中会开启MasterElection任务，定时周期性检测并尝试发起投票
+
+```java
+RaftCore MasterElection.calss
+        public void run() {
+            try {
+                
+                if (!peers.isReady()) {
+                    return;
+                }
+                //MasterElection task周期性执行，每次执行将Leader过期时间减去周期时间
+                //如果大于0则表示Leader正常
+                //如果小于0则标识Leader可能挂了，在过期时间内没有收到Leader的心跳了
+                RaftPeer local = peers.local();
+                local.leaderDueMs -= GlobalExecutor.TICK_PERIOD_MS;
+                
+                if (local.leaderDueMs > 0) {
+                    return;
+                }
+                
+                // reset timeout
+                local.resetLeaderDue();
+                local.resetHeartbeatDue();
+                //发起投票，竞选Leader
+                sendVote();
+            } catch (Exception e) {
+                Loggers.RAFT.warn("[RAFT] error while master election {}", e);
+            }
+            
+        }
+```
+
+```java
+RaftCore MasterElection.calss
+private void sendVote() {
+            //拿到代表自己的RaftPeer
+            RaftPeer local = peers.get(NetUtils.localServer());
+            Loggers.RAFT.info("leader timeout, start voting,leader: {}, term: {}", JacksonUtils.toJson(getLeader()),
+                    local.term);
+            
+            peers.reset();
+            //投票轮数加1，并默认自己投票给自己，并切换到Candidate模式
+            local.term.incrementAndGet();
+            local.voteFor = local.ip;
+            local.state = RaftPeer.State.CANDIDATE;
+            //封装数据
+            Map<String, String> params = new HashMap<>(1);
+            params.put("vote", JacksonUtils.toJson(local));
+ 						//遍历集群内除了自己的所有节点
+            for (final String server : peers.allServersWithoutMySelf()) {
+              	//向每个节点发起投票请求
+                final String url = buildUrl(server, API_VOTE);
+                try {
+                    HttpClient.asyncHttpPost(url, null, params, new AsyncCompletionHandler<Integer>() {
+                        @Override
+                        public Integer onCompleted(Response response) throws Exception {
+                            if (response.getStatusCode() != HttpURLConnection.HTTP_OK) {
+                                Loggers.RAFT
+                                        .error("NACOS-RAFT vote failed: {}, url: {}", response.getResponseBody(), url);
+                                return 1;
+                            }
+                            
+                            RaftPeer peer = JacksonUtils.toObj(response.getResponseBody(), RaftPeer.class);
+                            
+                            Loggers.RAFT.info("received approve from peer: {}", JacksonUtils.toJson(peer));
+                            //处理投票结果，该方法中如果统计该次轮次内获得的投票大于集群数量的一半则
+                          	//成功晋升为Leader，并向其他节点发送心跳
+                          	//如果不够票数，则等待下次任务执行，尝试再次发起下一轮次的竞选
+                            peers.decideLeader(peer);
+                            
+                            return 0;
+                        }
+                    });
+                } catch (Exception e) {
+                    Loggers.RAFT.warn("error while sending vote to server: {}", server);
+                }
+            }
+        }
+```
+
+```java
+RaftCore MasterElection.calss
+public synchronized RaftPeer receivedVote(RaftPeer remote) {
+  	//如果发起投票的节点不在我的节点列表中则不做处理
+    if (!peers.contains(remote)) {
+        throw new IllegalStateException("can not find peer: " + remote.ip);
+    }
+    
+    RaftPeer local = peers.get(NetUtils.localServer());
+  	//如果投票轮次小于当前节点轮次，则将轮次信息返回给remote节点，并投票给自己
+    if (remote.term.get() <= local.term.get()) {
+        String msg = "received illegitimate vote" + ", voter-term:" + remote.term + ", votee-term:" + local.term;
+        
+        Loggers.RAFT.info(msg);
+        if (StringUtils.isEmpty(local.voteFor)) {
+            local.voteFor = local.ip;
+        }
+        
+        return local;
+    }
+    
+    local.resetLeaderDue();
+    //将自己的模式设置为Follwoer并为remote节点投票
+    local.state = RaftPeer.State.FOLLOWER;
+    local.voteFor = remote.ip;
+    local.term.set(remote.term.get());
+    
+    Loggers.RAFT.info("vote {} as leader, term: {}", remote.ip, remote.term);
+    
+    return local;
+}
+```
+
+说明：
+
+1. 定时任务周期性的判断是否Leader以及掉线
+2. 如果Leader掉线，在周期内没有收到Leader心跳，则尝试发起投票
+3. 切换当前节点模式为Candidate，投票轮次加一，且默认自己投票给自己
+4. 封装投票数据，发送给集群内的其他节点
+5. 其他节点接收到投票，判断合法性之后，对该Remote节点进行投票
+6. Local节点对返回的投票数进行计算，如果大于集群的一半则晋升为Leader节点，向集群发送心跳
+
+# Nacos 部分
+
+nacos 集群节点接收到服务注册消息，如果是采用的Raft一致性方案的时候：
+
+1. 如果本地节点不是Leader节点则会将注册数据发送给Leader节点
+
+2. 如果本地节点是Leader节点，则进行写入File Cache和Map，并同步给集群其他节点，同步过程进行加锁处理保证数据一致性
+
+```java
+public void signalPublish(String key, Record value) throws Exception {
+    //如果当前节点是不是Leader，则通过raftProxy发送给Leader节点
+    if (!isLeader()) {
+        ObjectNode params = JacksonUtils.createEmptyJsonNode();
+        params.put("key", key);
+        params.replace("value", JacksonUtils.transferToJsonNode(value));
+        Map<String, String> parameters = new HashMap<>(1);
+        parameters.put("key", key);
+        
+        final RaftPeer leader = getLeader();
+        
+        raftProxy.proxyPostLarge(leader.ip, API_PUB, params.toString(), parameters);
+        return;
+    }
+    //如果当前节点是Leader节点，则将数据通过RaftStore保存之本地FileCache，并同步给集群内的其他节点
+  	//通过的时候进行加锁，保证数据的一致性
+    try {
+        OPERATE_LOCK.lock();
+        final long start = System.currentTimeMillis();
+        final Datum datum = new Datum();
+        datum.key = key;
+        datum.value = value;
+        if (getDatum(key) == null) {
+            datum.timestamp.set(1L);
+        } else {
+            datum.timestamp.set(getDatum(key).timestamp.incrementAndGet());
+        }
+        
+        ObjectNode json = JacksonUtils.createEmptyJsonNode();
+        json.replace("datum", JacksonUtils.transferToJsonNode(datum));
+        json.replace("source", JacksonUtils.transferToJsonNode(peers.local()));
+        
+        onPublish(datum, peers.local());
+        
+        final String content = json.toString();
+        
+        final CountDownLatch latch = new CountDownLatch(peers.majorityCount());
+        for (final String server : peers.allServersIncludeMyself()) {
+            if (isLeader(server)) {
+                latch.countDown();
+                continue;
+            }
+            final String url = buildUrl(server, API_ON_PUB);
+          	//通过Http请求将数据发送给所有节点
+            HttpClient.asyncHttpPostLarge(url, Arrays.asList("key=" + key), content,
+                    new AsyncCompletionHandler<Integer>() {
+                        @Override
+                        public Integer onCompleted(Response response) throws Exception {
+                            if (response.getStatusCode() != HttpURLConnection.HTTP_OK) {
+                                Loggers.RAFT
+                                        .warn("[RAFT] failed to publish data to peer, datumId={}, peer={}, http code={}",
+                                                datum.key, server, response.getStatusCode());
+                                return 1;
+                            }
+                            latch.countDown();
+                            return 0;
+                        }
+                        
+                        @Override
+                        public STATE onContentWriteCompleted() {
+                            return STATE.CONTINUE;
+                        }
+                    });
+            
+        }
+        
+        if (!latch.await(UtilsAndCommons.RAFT_PUBLISH_TIMEOUT, TimeUnit.MILLISECONDS)) {
+            // only majority servers return success can we consider this update success
+            Loggers.RAFT.error("data publish failed, caused failed to notify majority, key={}", key);
+            throw new IllegalStateException("data publish failed, caused failed to notify majority, key=" + key);
+        }
+        
+        long end = System.currentTimeMillis();
+        Loggers.RAFT.info("signalPublish cost {} ms, key: {}", (end - start), key);
+    } finally {
+        OPERATE_LOCK.unlock();
+    }
+}
+```
