@@ -1,4 +1,4 @@
-## Spring Cloud Discovery
+# Spring Cloud Hystrix
 
 
 
