@@ -510,7 +510,7 @@ protected Object doCreateBean(final String beanName, final RootBeanDefinition mb
      //执行
      //InstantiationAwareBeanPostProcessor.postProcessProperties()
      //InstantiationAwareBeanPostProcessor.postProcessPropertyValues()
-     //对Bean的属性等进行主动注入
+     //对Bean的属性等进行主动注入:通过AutowiredAnnotationBeanPostProcessor InjectionMetadata InjectedElement（AnnotatedFieldElement、AnnotatedMethodElement）对Bean进行依赖注入
       populateBean(beanName, mbd, instanceWrapper);
      //对AwareMethod进行注入
      //执行BeanPostProcessor.postProcessBeforeInitialization()
