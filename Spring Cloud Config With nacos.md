@@ -1,5 +1,13 @@
 # Spring Cloud Config With Nacos
 
+## 总体流程
+
+1. NacosPropertySourceLocator解析配置，从服务端拉取配置信息存入NacosPropertySourceRepository由NacosPropertySourceRepository维护
+2. NacosContextRefresher监听ApplicationReadyEvent事件，从NacosPropertySourceRepository中获取所有配置信息，构建Listener注册到NacosConfigService
+3. NacosConfigService采用长轮询机制从服务端刷新变更的配置数据，并回调Listener
+4. Listener接收到回调，记录到NacosRefreshHistory，发送RefreshEvent事件
+5. RefreshEventListener（Spring Cloud 相关类）接收到RefreshEvent事件，执行Environment环境刷新工作，会重新回到1的步骤
+
 ## NacosConfigManager
 
 ```mermaid
@@ -126,5 +134,19 @@ NacosContextRefresher -> NacosContextRefresher: create Listener
 NacosContextRefresher -> ConfigService: add Listener to ConfigerService
 ```
 
+## NacosPropertySourceLocator
 
+从NacosConfigProperties获取配置，构建PropertySource
+
+1. 构建NacosPropertySourceBuilder，用于下文构建NacosPropertySource
+2. 构建CompositePropertySource，用于下文往里添加PropertySource
+3. 从NacosConfigProperties中解析shared-configs配置的Config（维护了dataId和group以及refresh），构建NacosPropertySource，并通过refresh判定是否去服务端拉取对应的配置并构建NacosPropertySource加入到CompositePropertySource
+4. 从NacosConfigProperties中解析extension-configs配置的Config（维护了dataId和group以及refresh），构建NacosPropertySource，并通过refresh判定是否去服务端拉取对应的配置并构建NacosPropertySource加入到CompositePropertySource
+5. 从NacosConfigProperties中解析配置（dataId=dataIdPrefix），构建NacosPropertySource，并去服务端拉取对应的配置并构建NacosPropertySource加入到CompositePropertySource
+6. 从NacosConfigProperties中解析配置（dataId=dataIdPrefix.fileExtension），构建NacosPropertySource，并去服务端拉取对应的配置并构建NacosPropertySource加入到CompositePropertySource
+7. 从profile中解析配置（dataId=dataIdPrefix-profile.fileExtension），构建NacosPropertySource，并通过refresh判定是否去服务端拉取对应的配置并构建NacosPropertySource加入到CompositePropertySource
+
+**NacosPropertySourceBuilder构建NacosPropertySource时从服务端拉取配置信息构建NacosPropertySource并将该NacosPropertySource存入NacosPropertySourceRepository**
+
+## 配置持久化LocalConfigInfoProcessor
 

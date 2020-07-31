@@ -49,3 +49,7 @@ ConfigFileApplicationListener -> Loader: load and save to MutablePropertySources
 4. ConfigFileApplicationListener实现了EnvironmentPostProcessor的postProcessEnvironment方法，方法中使用Loader进行加载配置文件
 5. Loader使用对应的PropertySourceLoader加载profile配置，并将PropertySource添加到MutablePropertySources的propertySourceList
 
+## PropertySource
+
+todo
+
