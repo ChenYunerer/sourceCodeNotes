@@ -2,7 +2,18 @@
 
 ## NacosConfigManager
 
+```mermaid
+classDiagram
+class NacosConfigManager {
+private static ConfigService service;
+private NacosConfigProperties nacosConfigProperties;
+createConfigService();ConfigService
+getConfigService();ConfigService
+getNacosConfigProperties();NacosConfigProperties
+}
+```
 
+NacosConfigManager对象由NacosConfigAutoConfiguration进行构建，NacosConfigManager通过ConfigFactory创建并维护了NacosConfigService
 
 ## NacosConfigService
 
@@ -51,7 +62,7 @@ public NacosConfigService(Properties properties) throws NacosException {
 }
 ```
 
-**HttpAgent start**
+**HttpAgent**
 
 ```sequence
 NacosConfigService -> ServerHttpAgent: new ServerHttpAgent(properties)
@@ -65,12 +76,12 @@ MetricsHttpAgent -> MetricsHttpAgent: create GetServerListTask() and run \n try 
 
 1. 通过properties构建ServerHttpAgent对象
 2. ServerHttpAgent解析properties构建对应的ServerListManager维护配置服务信息以及SecurityProxy用于访问配置服务
-3. 通过SecurityProxy向所有配置服务器发送login请求
+3. 通过SecurityProxy向所有配置服务器发送login请求（如果username配置了的话发送请求，否则不发送）
 4. 启动定时任务默认每隔5秒钟再次发送login请求
 5. 通过ServerHttpAgent构建MetricsHttpAgent并调用start方法启动
 6. 构建GetServerListTask任务，每隔30秒获取最新的配置服务器列表
 
-**Worker start**
+**ClientWorker**
 
 ```sequence
 NacosConfigService -> ClientWorker: new ClientWorker(properties)
@@ -85,10 +96,35 @@ LongPollingRunnable -> LongPollingRunnable: try to get config from nacos server
 1. 构建ClientWorker对象
 2. ClientWorker构造方法解析properties获取timeout等配置
 3. 创建core poll size为1的Executor：executor，创建core poll size为cpu数量的Executor：executorService
-4. 通过executor（core poll size 1）不间断的(相隔10毫秒)
+4. 通过executor（core poll size 1）不间断的(相隔10毫秒)执行checkConfigInfo()方法
+5. checkConfigInfo()方法分批次执行LongPollingRunnable，向Nacos Server进行长轮询
+6. LongPollingRunnable获取ClientWorker维护的CacheData向配置服务器请求修改项，然后依次去拉取最新的数据进行更新
 
 ## NacosContextRefresher
 
-监听ApplicationReadyEvent事件，为NacosPropertySource注册Listener到ClientWorker
+NacosContextRefresher对象由NacosConfigAutoConfiguration进行构建
 
-## ClientWorker
+NacosContextRefresher监听ApplicationReadyEvent事件，当收到该事件时，获取NacosPropertySource构建Listener并注册到ConfigServer
+
+```mermaid
+classDiagram
+class NacosContextRefresher {
+private NacosConfigProperties nacosConfigProperties;
+private final NacosRefreshHistory nacosRefreshHistory;
+private final ConfigService configService;
+onApplicationEvent(ApplicationReadyEvent event); void	
+}
+```
+
+流程图：
+
+```sequence
+NacosContextRefresher -> NacosContextRefresher: Listen ApplicationReadyEvent
+NacosContextRefresher -> NacosPropertySourceRepository: get NacosPropertySource
+NacosPropertySourceRepository -> NacosContextRefresher: return NacosPropertySource
+NacosContextRefresher -> NacosContextRefresher: create Listener
+NacosContextRefresher -> ConfigService: add Listener to ConfigerService
+```
+
+
+
