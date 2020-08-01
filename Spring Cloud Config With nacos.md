@@ -2,7 +2,7 @@
 
 ## 总体流程
 
-1. NacosPropertySourceLocator解析配置，从服务端拉取配置信息存入NacosPropertySourceRepository由NacosPropertySourceRepository维护
+1. NacosPropertySourceLocator解析配置，从服务端拉取配置信息存入NacosPropertySourceRepository由NacosPropertySourceRepository维护，拉取配置时优先从本地文件读取，然后在从服务拉取
 2. NacosContextRefresher监听ApplicationReadyEvent事件，从NacosPropertySourceRepository中获取所有配置信息，构建Listener注册到NacosConfigService
 3. NacosConfigService采用长轮询机制从服务端刷新变更的配置数据，并回调Listener
 4. Listener接收到回调，记录到NacosRefreshHistory，发送RefreshEvent事件
@@ -150,3 +150,96 @@ NacosContextRefresher -> ConfigService: add Listener to ConfigerService
 
 ## 配置持久化LocalConfigInfoProcessor
 
+```mermaid
+classDiagram
+class LocalConfigInfoProcessor {
+getFailover(String serverName, String dataId, String group, String tenant);String
+getSnapshot(String name, String dataId, String group, String tenant);String
+readFile(File file);String
+saveSnapshot(String envName, String dataId, String group, String tenant, String config);void
+cleanAllSnapshot();void
+......
+}
+```
+
+LocalConfigInfoProcessor提供了配置持久化能力
+
+保存：
+
+```java
+ClientWorker.class
+  
+public String[] getServerConfig(String dataId, String group, String tenant, long readTimeout)
+    throws NacosException {
+    ......
+    switch (result.code) {
+        case HttpURLConnection.HTTP_OK:
+        		//从服务端获取配置信息时，如果返回码为200则，保存到文件
+            LocalConfigInfoProcessor.saveSnapshot(agent.getName(), dataId, group, tenant, result.content);
+            ct[0] = result.content;
+            if (result.headers.containsKey(CONFIG_TYPE)) {
+                ct[1] = result.headers.get(CONFIG_TYPE).get(0);
+            } else {
+                ct[1] = ConfigType.TEXT.getType();
+            }
+            return ct;
+        case HttpURLConnection.HTTP_NOT_FOUND:
+        		//从服务端获取配置信息时，如果返回码为404则，用null覆盖到文件
+            LocalConfigInfoProcessor.saveSnapshot(agent.getName(), dataId, group, tenant, null);
+            return ct;
+        ......
+    }
+}
+```
+
+读取：
+
+```java
+NacosConfigService.class
+  
+private String getConfigInner(String tenant, String dataId, String group, long timeoutMs) throws NacosException {
+    group = null2defaultGroup(group);
+    ParamUtils.checkKeyParam(dataId, group);
+    ConfigResponse cr = new ConfigResponse();
+
+    cr.setDataId(dataId);
+    cr.setTenant(tenant);
+    cr.setGroup(group);
+
+    // 优先使用本地配置
+    String content = LocalConfigInfoProcessor.getFailover(agent.getName(), dataId, group, tenant);
+    if (content != null) {
+        LOGGER.warn("[{}] [get-config] get failover ok, dataId={}, group={}, tenant={}, config={}", agent.getName(),
+            dataId, group, tenant, ContentUtils.truncateContent(content));
+        cr.setContent(content);
+        configFilterChainManager.doFilter(null, cr);
+        content = cr.getContent();
+        return content;
+    }
+  //从服务端获取配置
+    try {
+        String[] ct = worker.getServerConfig(dataId, group, tenant, timeoutMs);
+        cr.setContent(ct[0]);
+
+        configFilterChainManager.doFilter(null, cr);
+        content = cr.getContent();
+
+        return content;
+    } catch (NacosException ioe) {
+        if (NacosException.NO_RIGHT == ioe.getErrCode()) {
+            throw ioe;
+        }
+        LOGGER.warn("[{}] [get-config] get from server error, dataId={}, group={}, tenant={}, msg={}",
+            agent.getName(), dataId, group, tenant, ioe.toString());
+    }
+
+    LOGGER.warn("[{}] [get-config] get snapshot ok, dataId={}, group={}, tenant={}, config={}", agent.getName(),
+        dataId, group, tenant, ContentUtils.truncateContent(content));
+  	//如果请求服务端获取配置失败，则使用本地缓存中的配置信息
+    content = LocalConfigInfoProcessor.getSnapshot(agent.getName(), dataId, group, tenant);
+    cr.setContent(content);
+    configFilterChainManager.doFilter(null, cr);
+    content = cr.getContent();
+    return content;
+}
+```
