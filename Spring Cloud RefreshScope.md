@@ -178,6 +178,8 @@ RefreshScope -> GenericScope: destroy()
 通常配置中心类似NacosConfig都会在更新PropertySources之后发送RefreshEvent进行Bean刷新
 
 ```java
+NacosContextRefresher.class
+    
 private void registerNacosListener(final String groupKey, final String dataKey) {
    String key = NacosPropertySourceRepository.getMapKey(dataKey, groupKey);
    Listener listener = listenerMap.computeIfAbsent(key,
