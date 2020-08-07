@@ -257,7 +257,7 @@ if (!componentScans.isEmpty() &&
 
 5. @Value注解的处理
 
-   PropertySourcesPlaceholderConfigurer
+   AbstractAnnotationBeanPostProcessor
 
 #### GetBean
 
