@@ -29,3 +29,12 @@ public AopProxy createAopProxy(AdvisedSupport config) throws AopConfigException 
 	}
 ```
 
+wrapIfNecessary调用时机：
+
+1. AbstractAutoProxyCreator实现了什么artInstantiationAwareBeanPostProcessor，在postProcessAfterInitialization中调用wrapIfNecessary尝试构建代理
+2. getEarlyBeanReference中调用wrapIfNecessary
+
+getEarlyBeanReference：
+
+提早暴露bean的时候，通过这个方法获取正确的对象（代理或是非代理）
+
