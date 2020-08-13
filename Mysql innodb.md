@@ -147,7 +147,36 @@ master thread根据数据库运行状态进在4种循环中进行切换
 
 ### 关键特性
 
-1. 插入缓冲
-2. 两次写
-3. 自适应哈希索引
+1. 插入缓冲 Insert Buffer
+2. 两次写 Double Write
+3. 自适应哈希索引 Adaptive Hash Index
+4. 异步IO Async IO
+5. 刷新邻接页 Flush Neighbor Page
 
+#### 插入缓冲Insert Buffer
+
+Insert Buffer：
+
+对于插入的数据，主键自增的情况下，对于聚集索引页来说是顺序写入
+
+对于非聚集索引页（辅助索引页）来说，如果辅助索引是非唯一的，则先判断非聚集索引页是否存在缓存中，如果存在则直接进行插入，如果不在则将插入数据放入Insert Buffer中，然后通过一定的频率进行Insert Buffer和辅助索引的合并操作。这时通常能将多个插入合并到一个操作中，提高非聚集索引的插入性能。
+
+对于非聚集索引来说，如果辅助索引是唯一的，则需要访问所有该非聚集索引页来判断唯一情况。通常是随机访问，这也是由于B+树的特性决定的。
+
+Change Buffer：
+
+IChange Buffer是nsert Buffer的升级，可以对Insert Delte Update 进行缓冲，分别对应Insert Buffer，Delete Buffer，Purge Buffer。生效条件依旧是非聚集索引（辅助索引）且非唯一
+
+#### 两次写Double Write
+
+![image-20200814000213490](Mysql innodb.assets/image-20200814000213490.png)
+
+脏页进行落盘的时候，为避免写入部分数据时宕机（部分写失效），引入Double Write机制，落盘的时候先将脏页复制到Double Write Buffer（2M大小）然后由Double Write Buffer分2次每次1M大小顺序的写入共享表空间，再将Double Write Buffer中的页写入各个表空间文件中。
+
+#### 自适应哈希索引Adaptive Hash Index（AHI）
+
+哈希索引的时间复杂度为O1，查询次数为1次，而B+树的查询次数由其高度决定。
+
+InnoDB会监控对表上个***索引页***的查询，如果发现改用哈希索引能带来性能提升，则将B+树索引改为哈希索引。
+
+AHI要求：
