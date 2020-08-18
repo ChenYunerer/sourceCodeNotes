@@ -1,12 +1,15 @@
-## NIO
+# NIO
 
-### Channel（数据通道）对应实现有：FileChannel DatagramChannel SocketChannel ServerSocketChannel
+### Channel（数据通道）：
+对应实现有：FileChannel DatagramChannel SocketChannel ServerSocketChannel
 
-### Buffer（缓冲区）对应的实现有：ByteBuffer CharBuffer DoubleBuffer MappedByteBuffer 等
+### Buffer（缓冲区）：
+对应的实现有：ByteBuffer CharBuffer DoubleBuffer MappedByteBuffer 等
 
-### Selector（数据通道事件轮询器）：处理多个Channel，select()方法会一直阻塞到某个注册的通道有事件就绪，直到收到某个通道的事件，则进行对应的处理
+### Selector（数据通道事件轮询器）：
+处理多个Channel，select()方法会一直阻塞到某个注册的通道有事件就绪，直到收到某个通道的事件，则进行对应的处理
 
-#### TCP Example
+## TCP Example
 
 ```java
 public static void clientCode(){
@@ -137,3 +140,123 @@ public class ServerConnect
 }
 ```
 
+## 源码解析
+### ServerSocketChannel.open()
+
+```java
+ServerSocketChannel.class
+    
+public static ServerSocketChannel open() throws IOException {
+    	//获取SelectorProvider对象，并通过该对象获取ServerSocketChannel
+        return SelectorProvider.provider().openServerSocketChannel();
+}
+```
+```java
+SelectorProvider.class
+//SelectorProvider对象构建过程
+public static SelectorProvider provider() {
+        synchronized (lock) {
+            //加载过直接返回provider
+            if (provider != null)
+                return provider;
+            return AccessController.doPrivileged(
+                new PrivilegedAction<SelectorProvider>() {
+                    public SelectorProvider run() {
+                        	//如果Property配置了SelectorProvider的class则构建该Provider
+                            if (loadProviderFromProperty())
+                                return provider;
+                        	//通过ServiceLoader加载“插件化”加入的provider
+                            if (loadProviderAsService())
+                                return provider;
+                        	//通过DefaultSelectorProvider构建WindowsSelectorProvider
+                            provider = sun.nio.ch.DefaultSelectorProvider.create();
+                            return provider;
+                        }
+                    });
+        }
+}
+```
+
+```java
+SelectorProviderImpl.class
+//构建ServerSocketChannelImpl对象
+public ServerSocketChannel openServerSocketChannel() throws IOException {
+        return new ServerSocketChannelImpl(this);
+}
+```
+
+总结：
+
+1. 获取SelectorProvider，如果没有则进行构建
+2. 构建过程首先检查Property是否有定义SelectorProvider Class，其次ServiceLoader加载SelectorProvider，如果都没有则通过DefaultSelectorProvider构建默认的WindowsSelectorProvider
+3. 通过SelectorProvider构建ServerSocketChannel，实际构建的对象为ServerSocketChannelImpl
+
+### Selector.open()
+
+```java
+Selector.class
+
+public static Selector open() throws IOException {
+    //获取SelectorProvider,通过SelectorProvider构建Selector
+    return SelectorProvider.provider().openSelector();
+}
+```
+
+```java
+WindowsSelectorProvider.class
+    
+public AbstractSelector openSelector() throws IOException {
+        return new WindowsSelectorImpl(this);
+}
+```
+
+总结：
+
+1. 获取SelectorProvider，如果没有则进行构建
+2. SelectorProvider构建过程同上
+3. 通过SelectorProvider构建Selector，实际构建的对象为WindowsSelectorImpl
+
+### Selector.select()
+
+```java
+protected int doSelect(long var1) throws IOException {
+    if (this.channelArray == null) {
+        throw new ClosedSelectorException();
+    } else {
+        this.timeout = var1;
+        this.processDeregisterQueue();
+        if (this.interruptTriggered) {
+            this.resetWakeupSocket();
+            return 0;
+        } else {
+            this.adjustThreadsCount();
+            this.finishLock.reset();
+            this.startLock.startThreads();
+
+            try {
+                this.begin();
+
+                try {
+                    this.subSelector.poll();
+                } catch (IOException var7) {
+                    this.finishLock.setException(var7);
+                }
+
+                if (this.threads.size() > 0) {
+                    this.finishLock.waitForHelperThreads();
+                }
+            } finally {
+                this.end();
+            }
+
+            this.finishLock.checkForException();
+            this.processDeregisterQueue();
+            int var3 = this.updateSelectedKeys();
+            this.resetWakeupSocket();
+            return var3;
+        }
+    }
+}
+```
+
+### SocketChannel.read()
