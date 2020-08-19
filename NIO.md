@@ -12,6 +12,8 @@
 ### Selector（数据通道事件轮询器）：
 处理多个Channel，select()方法会一直阻塞到某个注册的通道有事件就绪，直到收到某个通道的事件，则进行对应的处理
 
+![image-20200819223322553](/Users/yuner/Library/Application Support/typora-user-images/image-20200819223322553.png)
+
 ## 源码解析
 ### ServerSocketChannel.open()
 
@@ -62,6 +64,8 @@ public ServerSocketChannel openServerSocketChannel() throws IOException {
 1. 获取SelectorProvider，如果没有则进行构建
 2. 构建过程首先检查Property是否有定义SelectorProvider Class，其次ServiceLoader加载SelectorProvider，如果都没有则通过DefaultSelectorProvider构建默认的WindowsSelectorProvider
 3. 通过SelectorProvider构建ServerSocketChannel，实际构建的对象为ServerSocketChannelImpl
+
+**注意：不同平台的JDK有不同的实现，Windows平台为ServerSocketChannelImpl，MacOS平台为KQueueSelectorImpl（KQueue类似于Epoll）**
 
 ### Selector.open()
 
