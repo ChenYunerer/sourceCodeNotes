@@ -12,7 +12,7 @@
 ### Selector（数据通道事件轮询器）：
 处理多个Channel，select()方法会一直阻塞到某个注册的通道有事件就绪，直到收到某个通道的事件，则进行对应的处理
 
-![image-20200819223322553](/Users/yuner/Library/Application Support/typora-user-images/image-20200819223322553.png)
+![image-20200820203915453](/Users/yuner/Library/Mobile Documents/com~apple~CloudDocs/sourceCodeNotes/NIO.assets/image-20200820203915453.png)
 
 ## 源码解析
 ### ServerSocketChannel.open()
