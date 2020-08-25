@@ -20,7 +20,103 @@ ServerBootstrap -> ServerBootstrap: doBind0()
 5. ChannelPipeline（双向链表）初始化的时候会固定2个context：TailContext HeadContext
 6. NioServerSocketChannel构建之后，对其进行初始化，设置options、arrtibutes以及ServerBootstrap设置的handler
 7. 将NioServerSocketChannel注册到NioEventLoopGroup
-8. 调用doBind0进行端口绑定，通过javaChanel（ServerSocketChannel）进行端口绑定
+8. 调用doBind0()，通过javaChanel（ServerSocketChannel）进行端口绑定
+
+## NioEventLoopGroup
+
+### 继承关系
+
+```mermaid
+classDiagram
+AbstractEventExecutorGroup <|-- MultithreadEventExecutorGroup
+MultithreadEventExecutorGroup <|-- MultithreadEventLoopGroup
+EventLoopGroup <|-- MultithreadEventLoopGroup
+<<interface>> EventLoopGroup
+MultithreadEventLoopGroup <|-- NioEventLoopGroup
+```
+
+### 构建
+
+```java
+MultithreadEventExecutorGroup.class
+//核心构建流程
+protected MultithreadEventExecutorGroup(int nThreads, Executor executor,
+                                            EventExecutorChooserFactory chooserFactory, Object... args) {
+        if (nThreads <= 0) {
+            throw new IllegalArgumentException(String.format("nThreads: %d (expected: > 0)", nThreads));
+        }
+    	//通过默认的ThreadFactory构建Executor
+        if (executor == null) {
+            executor = new ThreadPerTaskExecutor(newDefaultThreadFactory());
+        }
+    	//构建EventExecutor数组，数量默认为CPU核心数*2
+        children = new EventExecutor[nThreads];
+
+        for (int i = 0; i < nThreads; i ++) {
+            boolean success = false;
+            try {
+                //依次创建线程，创建的过程由NioEventLoopGroup具体实现
+                children[i] = newChild(executor, args);
+                success = true;
+            } catch (Exception e) {
+                // TODO: Think about if this is a good exception type
+                throw new IllegalStateException("failed to create a child event loop", e);
+            } finally {
+                //如果创建过程中发生错误，则依次关闭创建好的线程
+                if (!success) {
+                    for (int j = 0; j < i; j ++) {
+                        children[j].shutdownGracefully();
+                    }
+
+                    for (int j = 0; j < i; j ++) {
+                        EventExecutor e = children[j];
+                        try {
+                            while (!e.isTerminated()) {
+                                e.awaitTermination(Integer.MAX_VALUE, TimeUnit.SECONDS);
+                            }
+                        } catch (InterruptedException interrupted) {
+                            // Let the caller handle the interruption.
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    	//通过children创建EventExecutorChooser
+    	//EventExecutorChooser使用某种算法选择对应children中的EventExecutor
+        chooser = chooserFactory.newChooser(children);
+
+        final FutureListener<Object> terminationListener = new FutureListener<Object>() {
+            @Override
+            public void operationComplete(Future<Object> future) throws Exception {
+                if (terminatedChildren.incrementAndGet() == children.length) {
+                    terminationFuture.setSuccess(null);
+                }
+            }
+        };
+    	//为EventExecutor注册销毁回调
+        for (EventExecutor e: children) {
+            e.terminationFuture().addListener(terminationListener);
+        }
+
+        Set<EventExecutor> childrenSet = new LinkedHashSet<EventExecutor>(children.length);
+        Collections.addAll(childrenSet, children);
+        readonlyChildren = Collections.unmodifiableSet(childrenSet);
+    }
+```
+
+主要其实就是
+
+1. 构建EventExecutor数组，长度为CPU核心数*2
+
+2. 构建EventExecutorChooser用于选择EventExecutor
+
+## NioEventLoop
+
+以我理解，NioEventLoop就是每一个工作线程用于从select获取selectKey并进行进一步处理，NioEventLoop由NioEventLoopGroup进行维护
+
+todo......
 
 ## NioServerSocketChannel
 
@@ -108,7 +204,9 @@ protected AbstractChannel(Channel parent) {
 ServerBootstrap.class
   
 void init(Channel channel) {
+    	//为channel设置option
         setChannelOptions(channel, newOptionsArray(), logger);
+    	//为channel设置attribute
         setAttributes(channel, attrs0().entrySet().toArray(EMPTY_ATTRIBUTE_ARRAY));
 
         ChannelPipeline p = channel.pipeline();
@@ -120,7 +218,7 @@ void init(Channel channel) {
             currentChildOptions = childOptions.entrySet().toArray(EMPTY_OPTION_ARRAY);
         }
         final Entry<AttributeKey<?>, Object>[] currentChildAttrs = childAttrs.entrySet().toArray(EMPTY_ATTRIBUTE_ARRAY);
-
+    	//新增ChannelInitializer主要对ChannelPipeline增加自定义的handler
         p.addLast(new ChannelInitializer<Channel>() {
             @Override
             public void initChannel(final Channel ch) {
@@ -146,3 +244,66 @@ void init(Channel channel) {
 2. setAttributes
 3. pipeline addLast config handler
 4. pipeline addLast ServerBootstrapAcceptor
+
+### 注册
+
+```sequence
+AbstractBootstrap -> MultithreadEventLoopGroup: register channel
+MultithreadEventLoopGroup -> SingleThreadEventLoop: 1. choose a NioEventLoop by EventExecutorChooser \n 2. call NioEventLoop register method
+SingleThreadEventLoop -> AbstractChannel: call AbstractChannel register method
+AbstractChannel -> AbstractNioChannel: doRegister() register to java chanel
+AbstractChannel -> DefaultChannelPipeline: 1. pipeline.invokeHandlerAddedIfNeeded(); \n 2. pipeline.fireChannelRegistered();
+```
+#### 核心代码
+
+```java
+MultithreadEventLoopGroup.class
+    
+@Override
+public ChannelFuture register(Channel channel) {
+    //通过EventExecutorChooser获取一个NioEventLoop并调用其register方法
+    return next().register(channel);
+}
+```
+
+```
+SingleThreadEventLoop.class
+
+@Override
+public ChannelFuture register(Channel channel) {
+    return register(new DefaultChannelPromise(channel, this));
+}
+
+@Override
+public ChannelFuture register(final ChannelPromise promise) {
+    ObjectUtil.checkNotNull(promise, "promise");
+    promise.channel().unsafe().register(this, promise);
+    return promise;
+}
+```
+
+```java
+AbstractNioChannel.class
+    
+@Override
+protected void doRegister() throws Exception {
+    boolean selected = false;
+    for (;;) {
+        try {
+            selectionKey = javaChannel().register(eventLoop().unwrappedSelector(), 0, this);
+            return;
+        } catch (CancelledKeyException e) {
+            if (!selected) {
+                // Force the Selector to select now as the "canceled" SelectionKey may still be
+                // cached and not removed because no Select.select(..) operation was called yet.
+                eventLoop().selectNow();
+                selected = true;
+            } else {
+                // We forced a select operation on the selector before but the SelectionKey is still cached
+                // for whatever reason. JDK bug ?
+                throw e;
+            }
+        }
+    }
+}
+```
