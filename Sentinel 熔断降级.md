@@ -1,3 +1,9 @@
+---
+title: Sentinel 熔断降级
+---
+
+
+
 # Sentinel 熔断降级
 
 Sentinel @SentinelResource注解通过对应的Aspect进行拦截处理

@@ -1,3 +1,9 @@
+---
+title: Spring Cloud OpenFeign 2
+---
+
+
+
 ## Spring Cloud OpenFeign源码笔记2
 
 Feign.target 构建FeignClient代理

@@ -1,3 +1,9 @@
+---
+title: Spring Cloud OpenFeign 1
+---
+
+
+
 ## Spring Cloud OpenFeign源码笔记1
 
 openFeign 存在2个配置文件，分别FeignClientProperties.class FeignHttpClientProperties.class

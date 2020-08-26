@@ -1,3 +1,9 @@
+---
+title: Mysql InnoDB
+---
+
+
+
 # Mysql & Innodb
 
 ## 体系结构

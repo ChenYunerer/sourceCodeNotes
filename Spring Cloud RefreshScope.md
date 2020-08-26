@@ -1,3 +1,9 @@
+---
+title: Spring Cloud RefreshScope
+---
+
+
+
 # Spring Cloud RefreshScope
 
 ## AbstractBeanFactory create bean instance

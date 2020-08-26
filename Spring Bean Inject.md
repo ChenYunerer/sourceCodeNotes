@@ -1,3 +1,9 @@
+---
+title: Spring Bean Inject
+---
+
+
+
 # Spring Bean Inject
 
 ## AbstractAnnotationBeanPostProcessor

@@ -1,3 +1,9 @@
+---
+title: Sentinel 滑动窗口
+---
+
+
+
 # Sentinel滑动窗口
 
 sentinel记录QPS等数据时为了提高系统性能使用滑动窗口机制来进行处理

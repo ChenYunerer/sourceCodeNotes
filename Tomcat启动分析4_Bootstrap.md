@@ -1,3 +1,9 @@
+---
+title: Tomcat启动分析4_Bootstrap
+---
+
+
+
 ## Tomcat启动分析4_Bootstrap解析
 
 通过catalina.sh脚本可知，所有的启动、停止命令最终都是加载执行Bootstrap并传入对应start或是stop等参数，具体的处理由Bootstrap来处理。
