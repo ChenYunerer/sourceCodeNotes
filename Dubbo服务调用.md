@@ -324,6 +324,6 @@ AbstractLoadBalance <|-- ConsistentHashLoadBalance
 ```
 
 1. RandomLoadBalance：带权重的随机随机算法
-2. RoundRobinLoadBalance：轮训算法
+2. RoundRobinLoadBalance：轮询算法
 3. LeastActiveLoadBalance：最小活跃算法：活跃值指的是访问响应时间，最小活跃值也就是响应最快，活跃值相同则随机
 4. ConsistentHashLoadBalance：一致性Hash算法，相同参数的请求总是发到同一提供者
