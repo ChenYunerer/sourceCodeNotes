@@ -1,8 +1,8 @@
 ---
-title: Dubbo源码笔记
+title: Dubbo服务暴露
 data: 2020-09-01 12:04:14
 ---
-# Dubbo源码笔记（以dubbo协议 netty服务为例）
+# Dubbo服务暴露（以dubbo协议 netty服务为例）
 
 ## 服务暴露
 
