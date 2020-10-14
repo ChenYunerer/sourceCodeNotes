@@ -522,5 +522,107 @@ private void createAndUpdateQueueData(final String brokerName, final TopicConfig
 
 以上各个Map结合可以给consumer提供topic的路由信息
 
-## ConsumerTopic请求路由信息处理
+## Consumer Topic请求路由信息处理
+
+```java
+DefaultRequestProcessor.class
+  
+public RemotingCommand getRouteInfoByTopic(ChannelHandlerContext ctx,
+    RemotingCommand request) throws RemotingCommandException {
+  //构建返回的response
+    final RemotingCommand response = RemotingCommand.createResponseCommand(null);
+  //从请求中解析requestHeader
+    final GetRouteInfoRequestHeader requestHeader =
+        (GetRouteInfoRequestHeader) request.decodeCommandCustomHeader(GetRouteInfoRequestHeader.class);
+
+  //通过RouteInfoManager获取Topic路由信息
+    TopicRouteData topicRouteData = this.namesrvController.getRouteInfoManager().pickupTopicRouteData(requestHeader.getTopic());
+
+  //如果开启了顺序消息 则对topicRouteData设置OrderTopicConf
+    if (topicRouteData != null) {
+        if (this.namesrvController.getNamesrvConfig().isOrderMessageEnable()) {
+            String orderTopicConf =
+                this.namesrvController.getKvConfigManager().getKVConfig(NamesrvUtil.NAMESPACE_ORDER_TOPIC_CONFIG,
+                    requestHeader.getTopic());
+            topicRouteData.setOrderTopicConf(orderTopicConf);
+        }
+
+        byte[] content = topicRouteData.encode();
+        response.setBody(content);
+        response.setCode(ResponseCode.SUCCESS);
+        response.setRemark(null);
+        return response;
+    }
+
+    response.setCode(ResponseCode.TOPIC_NOT_EXIST);
+    response.setRemark("No topic route info in name server for the topic: " + requestHeader.getTopic()
+        + FAQUrl.suggestTodo(FAQUrl.APPLY_TOPIC_URL));
+    return response;
+}
+```
+
+```java
+RouteInfoManager.class
+//该方法1.从topicQueueTable中获取对应topic的QueueData，2.从brokerAddrTable中获取BrokerData，3.从filterServerTable中获取filterServerList，将数据封装成TopicRouteData返回
+public TopicRouteData pickupTopicRouteData(final String topic) {
+    TopicRouteData topicRouteData = new TopicRouteData();
+    boolean foundQueueData = false;
+    boolean foundBrokerData = false;
+    Set<String> brokerNameSet = new HashSet<String>();
+    List<BrokerData> brokerDataList = new LinkedList<BrokerData>();
+    topicRouteData.setBrokerDatas(brokerDataList);
+
+    HashMap<String, List<String>> filterServerMap = new HashMap<String, List<String>>();
+    topicRouteData.setFilterServerTable(filterServerMap);
+
+    try {
+        try {
+            this.lock.readLock().lockInterruptibly();
+            List<QueueData> queueDataList = this.topicQueueTable.get(topic);
+            if (queueDataList != null) {
+                topicRouteData.setQueueDatas(queueDataList);
+                foundQueueData = true;
+
+                Iterator<QueueData> it = queueDataList.iterator();
+                while (it.hasNext()) {
+                    QueueData qd = it.next();
+                    brokerNameSet.add(qd.getBrokerName());
+                }
+
+                for (String brokerName : brokerNameSet) {
+                    BrokerData brokerData = this.brokerAddrTable.get(brokerName);
+                    if (null != brokerData) {
+                        BrokerData brokerDataClone = new BrokerData(brokerData.getCluster(), brokerData.getBrokerName(), (HashMap<Long, String>) brokerData
+                            .getBrokerAddrs().clone());
+                        brokerDataList.add(brokerDataClone);
+                        foundBrokerData = true;
+                        for (final String brokerAddr : brokerDataClone.getBrokerAddrs().values()) {
+                            List<String> filterServerList = this.filterServerTable.get(brokerAddr);
+                            filterServerMap.put(brokerAddr, filterServerList);
+                        }
+                    }
+                }
+            }
+        } finally {
+            this.lock.readLock().unlock();
+        }
+    } catch (Exception e) {
+        log.error("pickupTopicRouteData Exception", e);
+    }
+
+    log.debug("pickupTopicRouteData {} {}", topic, topicRouteData);
+
+    if (foundBrokerData && foundQueueData) {
+        return topicRouteData;
+    }
+
+    return null;
+}
+```
+
+## 其他
+
+### 1. topicQueueTable brokerAddrTable等数据不做持久化处理，Broker会不断发送注册事件，Name Srv通过这些事件来维护这些数据，所以在Name Srv重启的一段时间内，而Broker处于发送注册事件的间隙，则Name Srv将存在短暂的时间无法提供有效的Topic 路由信息，但是过一段时间等所有Broker都注册上来之后就能恢复正常
+
+### 2. Namer Srv不持久化Topic路由信息，Broker会持久化其自身的Topic信息
 
