@@ -370,8 +370,10 @@ public RegisterBrokerResult registerBroker(
     RegisterBrokerResult result = new RegisterBrokerResult();
     try {
         try {
+            //操作加锁
             this.lock.writeLock().lockInterruptibly();
-
+            //将broker信息加入到其所属的集群中去
+            //clusterAddrTable: String集群名称<->set<String>该集群下的所有broker名称
             Set<String> brokerNames = this.clusterAddrTable.get(clusterName);
             if (null == brokerNames) {
                 brokerNames = new HashSet<String>();
@@ -381,6 +383,8 @@ public RegisterBrokerResult registerBroker(
 
             boolean registerFirst = false;
 
+            //将broker信息添加到brokerAddrTable
+            //brokerAddrTable: String Broker名称<->BrokerData Broker信息
             BrokerData brokerData = this.brokerAddrTable.get(brokerName);
             if (null == brokerData) {
                 registerFirst = true;
@@ -388,6 +392,7 @@ public RegisterBrokerResult registerBroker(
                 this.brokerAddrTable.put(brokerName, brokerData);
             }
             Map<Long, String> brokerAddrsMap = brokerData.getBrokerAddrs();
+            //如果发现有相同的IP和端口的Broker则删除老的数据，新增当前的Broker数据
             //Switch slave to master: first remove <1, IP:PORT> in namesrv, then add <0, IP:PORT>
             //The same IP:PORT must only have one record in brokerAddrTable
             Iterator<Entry<Long, String>> it = brokerAddrsMap.entrySet().iterator();
@@ -401,6 +406,7 @@ public RegisterBrokerResult registerBroker(
             String oldAddr = brokerData.getBrokerAddrs().put(brokerId, brokerAddr);
             registerFirst = registerFirst || (null == oldAddr);
 
+            //调用createAndUpdateQueueData方法创建或是更新这个broker的topic信息
             if (null != topicConfigWrapper
                 && MixAll.MASTER_ID == brokerId) {
                 if (this.isBrokerTopicConfigChanged(brokerAddr, topicConfigWrapper.getDataVersion())
@@ -409,12 +415,15 @@ public RegisterBrokerResult registerBroker(
                         topicConfigWrapper.getTopicConfigTable();
                     if (tcTable != null) {
                         for (Map.Entry<String, TopicConfig> entry : tcTable.entrySet()) {
+                            //见下文分析
                             this.createAndUpdateQueueData(brokerName, entry.getValue());
                         }
                     }
                 }
             }
 
+            //存储broker存活信息，主要用于记录其lastUpdateTimestamp字段，会有线程不断扫描非活跃broker并进行移除
+            //brokerLiveTable: String Broker地址<->BrokerLiveInfo Broker存活信息(心跳信息)
             BrokerLiveInfo prevBrokerLiveInfo = this.brokerLiveTable.put(brokerAddr,
                 new BrokerLiveInfo(
                     System.currentTimeMillis(),
@@ -425,6 +434,8 @@ public RegisterBrokerResult registerBroker(
                 log.info("new broker registered, {} HAServer: {}", brokerAddr, haServerAddr);
             }
 
+            //处理filterServerList
+            //filterServerTable：String Broker地址<->List<String> filterServerList
             if (filterServerList != null) {
                 if (filterServerList.isEmpty()) {
                     this.filterServerTable.remove(brokerAddr);
@@ -432,7 +443,7 @@ public RegisterBrokerResult registerBroker(
                     this.filterServerTable.put(brokerAddr, filterServerList);
                 }
             }
-
+            //如果当前Broker是非主节点，则获取其主节点信息，将信息返回给Client
             if (MixAll.MASTER_ID != brokerId) {
                 String masterAddr = brokerData.getBrokerAddrs().get(MixAll.MASTER_ID);
                 if (masterAddr != null) {
@@ -453,3 +464,63 @@ public RegisterBrokerResult registerBroker(
     return result;
 }
 ```
+
+```java
+RouteInfoManager.class
+    
+private void createAndUpdateQueueData(final String brokerName, final TopicConfig topicConfig) {
+    //封装QueueData
+    QueueData queueData = new QueueData();
+    queueData.setBrokerName(brokerName);
+    queueData.setWriteQueueNums(topicConfig.getWriteQueueNums());
+    queueData.setReadQueueNums(topicConfig.getReadQueueNums());
+    queueData.setPerm(topicConfig.getPerm());
+    queueData.setTopicSynFlag(topicConfig.getTopicSysFlag());
+
+    //从topicQueueTable根据topic名称获取QueueData信息
+    //如果原先没有，则添加到topicQueueTable中
+    //如果原先存在，则删除原先数据，然后添加新QueueData(QueueDatade的equals方法被重写过)
+    List<QueueData> queueDataList = this.topicQueueTable.get(topicConfig.getTopicName());
+    if (null == queueDataList) {
+        queueDataList = new LinkedList<QueueData>();
+        queueDataList.add(queueData);
+        this.topicQueueTable.put(topicConfig.getTopicName(), queueDataList);
+        log.info("new topic registered, {} {}", topicConfig.getTopicName(), queueData);
+    } else {
+        boolean addNewOne = true;
+
+        Iterator<QueueData> it = queueDataList.iterator();
+        while (it.hasNext()) {
+            QueueData qd = it.next();
+            if (qd.getBrokerName().equals(brokerName)) {
+                if (qd.equals(queueData)) {
+                    addNewOne = false;
+                } else {
+                    log.info("topic changed, {} OLD: {} NEW: {}", topicConfig.getTopicName(), qd,
+                        queueData);
+                    it.remove();
+                }
+            }
+        }
+
+        if (addNewOne) {
+            queueDataList.add(queueData);
+        }
+    }
+}
+```
+
+**以上涉及到的几个重要的HashMap**
+
+| 名称                  | key    | key说明                     | value           | value说明                                                    |
+| --------------------- | ------ | --------------------------- | --------------- | ------------------------------------------------------------ |
+| **clusterAddrTable**  | String | clusterName(broker集群名称) | Set<String>     | 该集群下的broker名称集合                                     |
+| **brokerAddrTable**   | String | brokerName broker名称       | BrokerData      | broker信息(集群名称，broker名称，Map<brokerID, brokerAddr>)  |
+| **brokerLiveTable**   | String | brokerAddr                  | BrokerLiveInfo  | broker存活信息(心跳信息)主要是维护了一个时间参数，可以用于判断改broker是否存活 |
+| **filterServerTable** | String | brokerAddr                  | List<String>    | filterServerList                                             |
+| **topicQueueTable**   | String | topic名称                   | List<QueueData> | 该topic所有可用的QueueData信息(brokerName等信息)             |
+
+以上各个Map结合可以给consumer提供topic的路由信息
+
+## ConsumerTopic请求路由信息处理
+
