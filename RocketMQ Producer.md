@@ -205,18 +205,109 @@ public void start() throws MQClientException {
 1. 如果没有指定name srv则尝试从某个http服务(配置中心)获取name srv
 2. 启动netty服务
 3. 启动各种定时任务
-   1. 定时fetchNameServerAddr:定时从http服务器获取name srv地址 间隔2分钟
-   2. 定时从name srv更新topic路由信息 默认间隔30秒
-   3. 定时清除下线的Broker,定时向Broker发送心跳 默认间隔30秒
-   4. 定时persistAllConsumerOffset：定时持久化Consumer的消费偏移量 默认间隔5秒
-   5. MQClientInstance定时调整线程池 默认间隔1分钟
+   1. **定时fetchNameServerAddr:定时从http服务器获取name srv地址 间隔2分钟**
+   2. **定时从name srv更新topic路由信息 默认间隔30秒**
+   3. **定时清除下线的Broker,定时向Broker发送心跳 默认间隔30秒**
+   4. **定时persistAllConsumerOffset：定时持久化Consumer的消费偏移量 默认间隔5秒**
+   5. **MQClientInstance定时调整线程池 默认间隔1分钟**
 4. 启动pullMessageService 启动rebalanceService 启动另一个defaultMQProducer这都与consumer相关
 
 **重点**：
 
-定时persistAllConsumerOffset：定时持久化Consumer的消费偏移量 默认间隔5秒，这个默认5秒持久化consumer的消费偏移量，如果broker宕机，极有可能造成消息的重复消费，所以customer一定要做好幂等
+定时persistAllConsumerOffset：定时持久化Consumer的消费偏移量 默认间隔5秒，这个默认5秒持久化consumer的消费偏移量，如果broker宕机，极有可能造成消息的重复消费，所以consumer一定要做好幂等
 
 ## Producer send msg
+
+```mermaid
+sequenceDiagram
+Message -> Message: create Message
+Message -> DefaultMQProducer: defaultMQProducer.send(msg)
+DefaultMQProducer -> DefaultMQProducer: change msg topic with Namespace
+DefaultMQProducer -> DefaultMQProducerImpl: defaultMQProducerImpl.send(msg)
+DefaultMQProducerImpl -> DefaultMQProducerImpl: 1.tryToFindTopicPublishInfo
+DefaultMQProducerImpl -> DefaultMQProducerImpl: 2.selectOneMessageQueue
+DefaultMQProducerImpl -> DefaultMQProducerImpl: 3.sendKernelImpl
+```
+
+重点关注两点：
+
+1. tryToFindTopicPublishInfo：topic路由寻址
+2. selectOneMessageQueue：负载均衡
+
+### 1. tryToFindTopicPublishInfo：topic路由寻址
+
+```java
+DefaultMQProducerImpl.class
+    
+private TopicPublishInfo tryToFindTopicPublishInfo(final String topic) {
+    TopicPublishInfo topicPublishInfo = this.topicPublishInfoTable.get(topic);
+    if (null == topicPublishInfo || !topicPublishInfo.ok()) {
+        this.topicPublishInfoTable.putIfAbsent(topic, new TopicPublishInfo());
+        this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic);
+        topicPublishInfo = this.topicPublishInfoTable.get(topic);
+    }
+
+    if (topicPublishInfo.isHaveTopicRouterInfo() || topicPublishInfo.ok()) {
+        return topicPublishInfo;
+    } else {
+        this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic, true, this.defaultMQProducer);
+        topicPublishInfo = this.topicPublishInfoTable.get(topic);
+        return topicPublishInfo;
+    }
+}
+```
+
+说明：
+
+1. 从topicPublishInfoTable Map中获取路由信息
+2. 如果路由信息在Map中不存在则调用updateTopicRouteInfoFromNameServer向NameSrv请求Topic路由信息并更新topicPublishInfoTable 
+
+### 2. selectOneMessageQueue：负载均衡
+
+```java
+MQFaultStrategy.class
+    
+public MessageQueue selectOneMessageQueue(final TopicPublishInfo tpInfo, final String lastBrokerName) {
+    if (this.sendLatencyFaultEnable) {
+        //开启了延时容错
+        try {
+            //首先获取上次使用的Queue index+1
+            int index = tpInfo.getSendWhichQueue().getAndIncrement();
+            for (int i = 0; i < tpInfo.getMessageQueueList().size(); i++) {
+                int pos = Math.abs(index++) % tpInfo.getMessageQueueList().size();
+                if (pos < 0)
+                    pos = 0;
+                //找到index对应的queue
+                MessageQueue mq = tpInfo.getMessageQueueList().get(pos);
+                if (latencyFaultTolerance.isAvailable(mq.getBrokerName())) {
+                    //如果queue对应的broker可用，则使用该broker
+                    if (null == lastBrokerName || mq.getBrokerName().equals(lastBrokerName))
+                        return mq;
+                }
+            }
+		   //如果上一步没找个合适的broker，则从所有的broker中选择一个相对合适的，并且broker是可写的
+            final String notBestBroker = latencyFaultTolerance.pickOneAtLeast();
+            int writeQueueNums = tpInfo.getQueueIdByBroker(notBestBroker);
+            if (writeQueueNums > 0) {
+                final MessageQueue mq = tpInfo.selectOneMessageQueue();
+                if (notBestBroker != null) {
+                    mq.setBrokerName(notBestBroker);
+                    mq.setQueueId(tpInfo.getSendWhichQueue().getAndIncrement() % writeQueueNums);
+                }
+                return mq;
+            } else {
+                latencyFaultTolerance.remove(notBestBroker);
+            }
+        } catch (Exception e) {
+            log.error("Error occurred when selecting message queue", e);
+        }
+
+        return tpInfo.selectOneMessageQueue();
+    }
+	//未开启延时容错，直接按顺序选下一个
+    return tpInfo.selectOneMessageQueue(lastBrokerName);
+}
+```
 
 ### 同步
 
