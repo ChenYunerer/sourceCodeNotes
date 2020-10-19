@@ -530,7 +530,9 @@ private SendResult sendKernelImpl(final Message msg,
 3. 处理Hook
 4. 封装SendMessageRequestHeader由MQClientAPIImpl构建RemotingCommand通过netty发送请求
 
+## 异步消息
 
+和以上同步的类似，只不过异步消息会将消息存在Map容器中，由后台线程定时获取部分消息批量发送到Broker，发送过程和同步一致
 
 
 
