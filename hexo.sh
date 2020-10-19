@@ -1,5 +1,7 @@
 #!/bin/bash
-cp -rf ./* /Users/yuner/WorkSpace/hexo/blog/source/_posts
+rm -rf /Users/yuner/WorkSpace/hexo/blog/source/_posts/*
+mkdir -p /Users/yuner/WorkSpace/hexo/blog/source/_posts
+cp -rfp ./* /Users/yuner/WorkSpace/hexo/blog/source/_posts
 cd /Users/yuner/WorkSpace/hexo/blog
 hexo clean
 hexo g
