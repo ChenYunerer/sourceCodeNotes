@@ -338,7 +338,7 @@ private void rebalanceByTopic(final String topic, final boolean isOrder) {
                 if (allocateResult != null) {
                     allocateResultSet.addAll(allocateResult);
                 }
-
+                //在RebalanceImpl中更新processQueueTable，主要就是在该方法中构建PullRequest并添加到PullMessageService的pullRequestQueue队列中，PullMessageService将从该队列取出PullRequest然后向Broker发起请求
                 boolean changed = this.updateProcessQueueTableInRebalance(topic, allocateResultSet, isOrder);
                 if (changed) {
                     log.info(
@@ -356,6 +356,84 @@ private void rebalanceByTopic(final String topic, final boolean isOrder) {
 }
 ```
 
+```java
+RebalanceImpl.class
+  
+private boolean updateProcessQueueTableInRebalance(final String topic, final Set<MessageQueue> mqSet,
+    final boolean isOrder) {
+    boolean changed = false;
+  	//以下代码其实就是在更新processQueueTable
+    Iterator<Entry<MessageQueue, ProcessQueue>> it = this.processQueueTable.entrySet().iterator();
+    while (it.hasNext()) {
+        Entry<MessageQueue, ProcessQueue> next = it.next();
+        MessageQueue mq = next.getKey();
+        ProcessQueue pq = next.getValue();
+
+        if (mq.getTopic().equals(topic)) {
+            if (!mqSet.contains(mq)) {
+                pq.setDropped(true);
+                if (this.removeUnnecessaryMessageQueue(mq, pq)) {
+                    it.remove();
+                    changed = true;
+                    log.info("doRebalance, {}, remove unnecessary mq, {}", consumerGroup, mq);
+                }
+            } else if (pq.isPullExpired()) {
+                switch (this.consumeType()) {
+                    case CONSUME_ACTIVELY:
+                        break;
+                    case CONSUME_PASSIVELY:
+                        pq.setDropped(true);
+                        if (this.removeUnnecessaryMessageQueue(mq, pq)) {
+                            it.remove();
+                            changed = true;
+                            log.error("[BUG]doRebalance, {}, remove unnecessary mq, {}, because pull is pause, so try to fixed it",
+                                consumerGroup, mq);
+                        }
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+    }
+  	//构建PullRequest
+    List<PullRequest> pullRequestList = new ArrayList<PullRequest>();
+    for (MessageQueue mq : mqSet) {
+        if (!this.processQueueTable.containsKey(mq)) {
+            if (isOrder && !this.lock(mq)) {
+                log.warn("doRebalance, {}, add a new mq failed, {}, because lock failed", consumerGroup, mq);
+                continue;
+            }
+
+            this.removeDirtyOffset(mq);
+            ProcessQueue pq = new ProcessQueue();
+            long nextOffset = this.computePullFromWhere(mq);
+            if (nextOffset >= 0) {
+                ProcessQueue pre = this.processQueueTable.putIfAbsent(mq, pq);
+                if (pre != null) {
+                    log.info("doRebalance, {}, mq already exists, {}", consumerGroup, mq);
+                } else {
+                    log.info("doRebalance, {}, add a new mq, {}", consumerGroup, mq);
+                    PullRequest pullRequest = new PullRequest();
+                    pullRequest.setConsumerGroup(consumerGroup);
+                    pullRequest.setNextOffset(nextOffset);
+                    pullRequest.setMessageQueue(mq);
+                    pullRequest.setProcessQueue(pq);
+                    pullRequestList.add(pullRequest);
+                    changed = true;
+                }
+            } else {
+                log.warn("doRebalance, {}, add new mq failed, {}", consumerGroup, mq);
+            }
+        }
+    }
+  	//分发PullRequest其实就是将pullRequestList添加到PullMessageService的pullRequestQueue队列中，PullMessageService将从该队列取出PullRequest然后向Broker发起请求
+    this.dispatchPullRequest(pullRequestList);
+
+    return changed;
+}
+```
+
 **以上涉及到的几个重要的HashMap**
 
 | 名称                                  | key          | key说明               | value                 | value说明                     |
@@ -367,4 +445,306 @@ private void rebalanceByTopic(final String topic, final boolean isOrder) {
 
 ## PullMessageService start
 
-## ConsumeMessageService start
+```java
+PullMessageService.class
+  
+public void run() {
+    log.info(this.getServiceName() + " service started");
+
+    while (!this.isStopped()) {
+        try {
+          	//阻塞式从pullRequestQueue中获取PullRequest并进行处理（发送消息到broker来获取message）
+            PullRequest pullRequest = this.pullRequestQueue.take();
+            this.pullMessage(pullRequest);
+        } catch (InterruptedException ignored) {
+        } catch (Exception e) {
+            log.error("Pull Message Service Run Method exception", e);
+        }
+    }
+
+    log.info(this.getServiceName() + " service end");
+}
+```
+
+```java
+PullMessageService.class
+  
+private void pullMessage(final PullRequest pullRequest) {
+  	//获取对应的MQConsumerInner并调用其pullMessage
+    final MQConsumerInner consumer = this.mQClientFactory.selectConsumer(pullRequest.getConsumerGroup());
+    if (consumer != null) {
+        DefaultMQPushConsumerImpl impl = (DefaultMQPushConsumerImpl) consumer;
+        impl.pullMessage(pullRequest);
+    } else {
+        log.warn("No matched consumer for the PullRequest {}, drop it", pullRequest);
+    }
+}
+```
+
+```java
+DefaultMQPushConsumerImpl.class
+
+public void pullMessage(final PullRequest pullRequest) {
+    final ProcessQueue processQueue = pullRequest.getProcessQueue();
+    if (processQueue.isDropped()) {
+        log.info("the pull request[{}] is dropped.", pullRequest.toString());
+        return;
+    }
+
+    pullRequest.getProcessQueue().setLastPullTimestamp(System.currentTimeMillis());
+
+    try {
+        this.makeSureStateOK();
+    } catch (MQClientException e) {
+        log.warn("pullMessage exception, consumer state not ok", e);
+        this.executePullRequestLater(pullRequest, pullTimeDelayMillsWhenException);
+        return;
+    }
+
+    if (this.isPause()) {
+        log.warn("consumer was paused, execute pull request later. instanceName={}, group={}", this.defaultMQPushConsumer.getInstanceName(), this.defaultMQPushConsumer.getConsumerGroup());
+        this.executePullRequestLater(pullRequest, PULL_TIME_DELAY_MILLS_WHEN_SUSPEND);
+        return;
+    }
+
+    long cachedMessageCount = processQueue.getMsgCount().get();
+    long cachedMessageSizeInMiB = processQueue.getMsgSize().get() / (1024 * 1024);
+
+    if (cachedMessageCount > this.defaultMQPushConsumer.getPullThresholdForQueue()) {
+        this.executePullRequestLater(pullRequest, PULL_TIME_DELAY_MILLS_WHEN_FLOW_CONTROL);
+        if ((queueFlowControlTimes++ % 1000) == 0) {
+            log.warn(
+                "the cached message count exceeds the threshold {}, so do flow control, minOffset={}, maxOffset={}, count={}, size={} MiB, pullRequest={}, flowControlTimes={}",
+                this.defaultMQPushConsumer.getPullThresholdForQueue(), processQueue.getMsgTreeMap().firstKey(), processQueue.getMsgTreeMap().lastKey(), cachedMessageCount, cachedMessageSizeInMiB, pullRequest, queueFlowControlTimes);
+        }
+        return;
+    }
+
+    if (cachedMessageSizeInMiB > this.defaultMQPushConsumer.getPullThresholdSizeForQueue()) {
+        this.executePullRequestLater(pullRequest, PULL_TIME_DELAY_MILLS_WHEN_FLOW_CONTROL);
+        if ((queueFlowControlTimes++ % 1000) == 0) {
+            log.warn(
+                "the cached message size exceeds the threshold {} MiB, so do flow control, minOffset={}, maxOffset={}, count={}, size={} MiB, pullRequest={}, flowControlTimes={}",
+                this.defaultMQPushConsumer.getPullThresholdSizeForQueue(), processQueue.getMsgTreeMap().firstKey(), processQueue.getMsgTreeMap().lastKey(), cachedMessageCount, cachedMessageSizeInMiB, pullRequest, queueFlowControlTimes);
+        }
+        return;
+    }
+
+    if (!this.consumeOrderly) {
+        if (processQueue.getMaxSpan() > this.defaultMQPushConsumer.getConsumeConcurrentlyMaxSpan()) {
+            this.executePullRequestLater(pullRequest, PULL_TIME_DELAY_MILLS_WHEN_FLOW_CONTROL);
+            if ((queueMaxSpanFlowControlTimes++ % 1000) == 0) {
+                log.warn(
+                    "the queue's messages, span too long, so do flow control, minOffset={}, maxOffset={}, maxSpan={}, pullRequest={}, flowControlTimes={}",
+                    processQueue.getMsgTreeMap().firstKey(), processQueue.getMsgTreeMap().lastKey(), processQueue.getMaxSpan(),
+                    pullRequest, queueMaxSpanFlowControlTimes);
+            }
+            return;
+        }
+    } else {
+        if (processQueue.isLocked()) {
+            if (!pullRequest.isLockedFirst()) {
+                final long offset = this.rebalanceImpl.computePullFromWhere(pullRequest.getMessageQueue());
+                boolean brokerBusy = offset < pullRequest.getNextOffset();
+                log.info("the first time to pull message, so fix offset from broker. pullRequest: {} NewOffset: {} brokerBusy: {}",
+                    pullRequest, offset, brokerBusy);
+                if (brokerBusy) {
+                    log.info("[NOTIFYME]the first time to pull message, but pull request offset larger than broker consume offset. pullRequest: {} NewOffset: {}",
+                        pullRequest, offset);
+                }
+
+                pullRequest.setLockedFirst(true);
+                pullRequest.setNextOffset(offset);
+            }
+        } else {
+            this.executePullRequestLater(pullRequest, pullTimeDelayMillsWhenException);
+            log.info("pull message later because not locked in broker, {}", pullRequest);
+            return;
+        }
+    }
+
+    final SubscriptionData subscriptionData = this.rebalanceImpl.getSubscriptionInner().get(pullRequest.getMessageQueue().getTopic());
+    if (null == subscriptionData) {
+        this.executePullRequestLater(pullRequest, pullTimeDelayMillsWhenException);
+        log.warn("find the consumer's subscription failed, {}", pullRequest);
+        return;
+    }
+
+    final long beginTimestamp = System.currentTimeMillis();
+
+    PullCallback pullCallback = new PullCallback() {
+        @Override
+        public void onSuccess(PullResult pullResult) {
+            if (pullResult != null) {
+                pullResult = DefaultMQPushConsumerImpl.this.pullAPIWrapper.processPullResult(pullRequest.getMessageQueue(), pullResult,
+                    subscriptionData);
+
+                switch (pullResult.getPullStatus()) {
+                    case FOUND:
+                        long prevRequestOffset = pullRequest.getNextOffset();
+                        pullRequest.setNextOffset(pullResult.getNextBeginOffset());
+                        long pullRT = System.currentTimeMillis() - beginTimestamp;
+                        DefaultMQPushConsumerImpl.this.getConsumerStatsManager().incPullRT(pullRequest.getConsumerGroup(),
+                            pullRequest.getMessageQueue().getTopic(), pullRT);
+
+                        long firstMsgOffset = Long.MAX_VALUE;
+                        if (pullResult.getMsgFoundList() == null || pullResult.getMsgFoundList().isEmpty()) {
+                            DefaultMQPushConsumerImpl.this.executePullRequestImmediately(pullRequest);
+                        } else {
+                            firstMsgOffset = pullResult.getMsgFoundList().get(0).getQueueOffset();
+
+                            DefaultMQPushConsumerImpl.this.getConsumerStatsManager().incPullTPS(pullRequest.getConsumerGroup(),
+                                pullRequest.getMessageQueue().getTopic(), pullResult.getMsgFoundList().size());
+
+                            boolean dispatchToConsume = processQueue.putMessage(pullResult.getMsgFoundList());
+                            DefaultMQPushConsumerImpl.this.consumeMessageService.submitConsumeRequest(
+                                pullResult.getMsgFoundList(),
+                                processQueue,
+                                pullRequest.getMessageQueue(),
+                                dispatchToConsume);
+
+                            if (DefaultMQPushConsumerImpl.this.defaultMQPushConsumer.getPullInterval() > 0) {
+                                DefaultMQPushConsumerImpl.this.executePullRequestLater(pullRequest,
+                                    DefaultMQPushConsumerImpl.this.defaultMQPushConsumer.getPullInterval());
+                            } else {
+                                DefaultMQPushConsumerImpl.this.executePullRequestImmediately(pullRequest);
+                            }
+                        }
+
+                        if (pullResult.getNextBeginOffset() < prevRequestOffset
+                            || firstMsgOffset < prevRequestOffset) {
+                            log.warn(
+                                "[BUG] pull message result maybe data wrong, nextBeginOffset: {} firstMsgOffset: {} prevRequestOffset: {}",
+                                pullResult.getNextBeginOffset(),
+                                firstMsgOffset,
+                                prevRequestOffset);
+                        }
+
+                        break;
+                    case NO_NEW_MSG:
+                        pullRequest.setNextOffset(pullResult.getNextBeginOffset());
+
+                        DefaultMQPushConsumerImpl.this.correctTagsOffset(pullRequest);
+
+                        DefaultMQPushConsumerImpl.this.executePullRequestImmediately(pullRequest);
+                        break;
+                    case NO_MATCHED_MSG:
+                        pullRequest.setNextOffset(pullResult.getNextBeginOffset());
+
+                        DefaultMQPushConsumerImpl.this.correctTagsOffset(pullRequest);
+
+                        DefaultMQPushConsumerImpl.this.executePullRequestImmediately(pullRequest);
+                        break;
+                    case OFFSET_ILLEGAL:
+                        log.warn("the pull request offset illegal, {} {}",
+                            pullRequest.toString(), pullResult.toString());
+                        pullRequest.setNextOffset(pullResult.getNextBeginOffset());
+
+                        pullRequest.getProcessQueue().setDropped(true);
+                        DefaultMQPushConsumerImpl.this.executeTaskLater(new Runnable() {
+
+                            @Override
+                            public void run() {
+                                try {
+                                    DefaultMQPushConsumerImpl.this.offsetStore.updateOffset(pullRequest.getMessageQueue(),
+                                        pullRequest.getNextOffset(), false);
+
+                                    DefaultMQPushConsumerImpl.this.offsetStore.persist(pullRequest.getMessageQueue());
+
+                                    DefaultMQPushConsumerImpl.this.rebalanceImpl.removeProcessQueue(pullRequest.getMessageQueue());
+
+                                    log.warn("fix the pull request offset, {}", pullRequest);
+                                } catch (Throwable e) {
+                                    log.error("executeTaskLater Exception", e);
+                                }
+                            }
+                        }, 10000);
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+
+        @Override
+        public void onException(Throwable e) {
+            if (!pullRequest.getMessageQueue().getTopic().startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
+                log.warn("execute the pull request exception", e);
+            }
+
+            DefaultMQPushConsumerImpl.this.executePullRequestLater(pullRequest, pullTimeDelayMillsWhenException);
+        }
+    };
+
+    boolean commitOffsetEnable = false;
+    long commitOffsetValue = 0L;
+    if (MessageModel.CLUSTERING == this.defaultMQPushConsumer.getMessageModel()) {
+        commitOffsetValue = this.offsetStore.readOffset(pullRequest.getMessageQueue(), ReadOffsetType.READ_FROM_MEMORY);
+        if (commitOffsetValue > 0) {
+            commitOffsetEnable = true;
+        }
+    }
+
+    String subExpression = null;
+    boolean classFilter = false;
+    SubscriptionData sd = this.rebalanceImpl.getSubscriptionInner().get(pullRequest.getMessageQueue().getTopic());
+    if (sd != null) {
+        if (this.defaultMQPushConsumer.isPostSubscriptionWhenPull() && !sd.isClassFilterMode()) {
+            subExpression = sd.getSubString();
+        }
+
+        classFilter = sd.isClassFilterMode();
+    }
+
+    int sysFlag = PullSysFlag.buildSysFlag(
+        commitOffsetEnable, // commitOffset
+        true, // suspend
+        subExpression != null, // subscription
+        classFilter // class filter
+    );
+    try {
+        this.pullAPIWrapper.pullKernelImpl(
+            pullRequest.getMessageQueue(),
+            subExpression,
+            subscriptionData.getExpressionType(),
+            subscriptionData.getSubVersion(),
+            pullRequest.getNextOffset(),
+            this.defaultMQPushConsumer.getPullBatchSize(),
+            sysFlag,
+            commitOffsetValue,
+            BROKER_SUSPEND_MAX_TIME_MILLIS,
+            CONSUMER_TIMEOUT_MILLIS_WHEN_SUSPEND,
+            CommunicationMode.ASYNC,
+            pullCallback
+        );
+    } catch (Exception e) {
+        log.error("pullKernelImpl exception", e);
+        this.executePullRequestLater(pullRequest, pullTimeDelayMillsWhenException);
+    }
+}
+```
+
+### PullMessageService pullMessage主要部分：
+#### 第一部分
+##### 判断是否需要延迟发送Pull消息，如果需要则延迟执行
+
+1. 如果堆积未处理的消息过多，则扔回PullMessageService,延时执行（默认50ms）
+
+2. 如果堆积消息的size过大，则扔回PullMessageService,延时执行（默认50ms）
+
+3. 无序消息，则扔回PullMessageService,延时执行（默认50ms）
+
+#### 第二部分
+
+##### 检查订阅关系有没有变化（有可能在延时期间，topic或者consumer的配置都发生了变化）
+
+#### 第三部分
+
+##### 发送请求并通过PullCallback处理返回逻辑，如果正常返回则直接往PullMessageService的pullRequestQueue再扔一个RequestQueue，等于说再次发起下次请求，类似于长轮询（long poll）
+
+#### 第四部分
+
+##### 将请求返回的Mesage提交到ConsumeMessageService由ConsumeMessageService异步回调给Consumer注册的MessageListener
+
+## ConsumeMessageService 消息回调
+
