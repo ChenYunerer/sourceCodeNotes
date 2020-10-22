@@ -746,5 +746,138 @@ public void pullMessage(final PullRequest pullRequest) {
 
 ##### 将请求返回的Mesage提交到ConsumeMessageService由ConsumeMessageService异步回调给Consumer注册的MessageListener
 
-## ConsumeMessageService 消息回调
+## ConsumeMessageService 消息回调（Concurrently）
 
+上文当PullCallback回调时，如果存在消息则将消息提交给consumeMessageService
+
+```java
+ConsumeMessageConcurrentlyService.class
+    
+public void submitConsumeRequest(
+    final List<MessageExt> msgs,
+    final ProcessQueue processQueue,
+    final MessageQueue messageQueue,
+    final boolean dispatchToConsume) {
+    final int consumeBatchSize = this.defaultMQPushConsumer.getConsumeMessageBatchMaxSize();
+    if (msgs.size() <= consumeBatchSize) {
+        //如果消息数量小于设置的批量消费数量 则直接构建ConsumeRequest并且异步执行回调监听器 如果线程池慢了则稍后再次提交
+        ConsumeRequest consumeRequest = new ConsumeRequest(msgs, processQueue, messageQueue);
+        try {
+            this.consumeExecutor.submit(consumeRequest);
+        } catch (RejectedExecutionException e) {
+            this.submitConsumeRequestLater(consumeRequest);
+        }
+    } else {
+        //如果消息数量大于设置的批量消费数量 则分批次构建ConsumeRequest并且异步执行回调监听器 如果线程池慢了则稍后再次提交
+        for (int total = 0; total < msgs.size(); ) {
+            List<MessageExt> msgThis = new ArrayList<MessageExt>(consumeBatchSize);
+            for (int i = 0; i < consumeBatchSize; i++, total++) {
+                if (total < msgs.size()) {
+                    msgThis.add(msgs.get(total));
+                } else {
+                    break;
+                }
+            }
+
+            ConsumeRequest consumeRequest = new ConsumeRequest(msgThis, processQueue, messageQueue);
+            try {
+                this.consumeExecutor.submit(consumeRequest);
+            } catch (RejectedExecutionException e) {
+                for (; total < msgs.size(); total++) {
+                    msgThis.add(msgs.get(total));
+                }
+
+                this.submitConsumeRequestLater(consumeRequest);
+            }
+        }
+    }
+}
+```
+
+```java
+ConsumeRequest.class
+    
+public void run() {
+    if (this.processQueue.isDropped()) {
+        log.info("the message queue not be able to consume, because it's dropped. group={} {}", ConsumeMessageConcurrentlyService.this.consumerGroup, this.messageQueue);
+        return;
+    }
+
+    MessageListenerConcurrently listener = ConsumeMessageConcurrentlyService.this.messageListener;
+    ConsumeConcurrentlyContext context = new ConsumeConcurrentlyContext(messageQueue);
+    ConsumeConcurrentlyStatus status = null;
+    defaultMQPushConsumerImpl.resetRetryAndNamespace(msgs, defaultMQPushConsumer.getConsumerGroup());
+
+    ConsumeMessageContext consumeMessageContext = null;
+    if (ConsumeMessageConcurrentlyService.this.defaultMQPushConsumerImpl.hasHook()) {
+        consumeMessageContext = new ConsumeMessageContext();
+        consumeMessageContext.setNamespace(defaultMQPushConsumer.getNamespace());
+        consumeMessageContext.setConsumerGroup(defaultMQPushConsumer.getConsumerGroup());
+        consumeMessageContext.setProps(new HashMap<String, String>());
+        consumeMessageContext.setMq(messageQueue);
+        consumeMessageContext.setMsgList(msgs);
+        consumeMessageContext.setSuccess(false);
+        ConsumeMessageConcurrentlyService.this.defaultMQPushConsumerImpl.executeHookBefore(consumeMessageContext);
+    }
+
+    long beginTimestamp = System.currentTimeMillis();
+    boolean hasException = false;
+    ConsumeReturnType returnType = ConsumeReturnType.SUCCESS;
+    try {
+        if (msgs != null && !msgs.isEmpty()) {
+            for (MessageExt msg : msgs) {
+                MessageAccessor.setConsumeStartTimeStamp(msg, String.valueOf(System.currentTimeMillis()));
+            }
+        }
+        status = listener.consumeMessage(Collections.unmodifiableList(msgs), context);
+    } catch (Throwable e) {
+        log.warn("consumeMessage exception: {} Group: {} Msgs: {} MQ: {}",
+            RemotingHelper.exceptionSimpleDesc(e),
+            ConsumeMessageConcurrentlyService.this.consumerGroup,
+            msgs,
+            messageQueue);
+        hasException = true;
+    }
+    long consumeRT = System.currentTimeMillis() - beginTimestamp;
+    if (null == status) {
+        if (hasException) {
+            returnType = ConsumeReturnType.EXCEPTION;
+        } else {
+            returnType = ConsumeReturnType.RETURNNULL;
+        }
+    } else if (consumeRT >= defaultMQPushConsumer.getConsumeTimeout() * 60 * 1000) {
+        returnType = ConsumeReturnType.TIME_OUT;
+    } else if (ConsumeConcurrentlyStatus.RECONSUME_LATER == status) {
+        returnType = ConsumeReturnType.FAILED;
+    } else if (ConsumeConcurrentlyStatus.CONSUME_SUCCESS == status) {
+        returnType = ConsumeReturnType.SUCCESS;
+    }
+
+    if (ConsumeMessageConcurrentlyService.this.defaultMQPushConsumerImpl.hasHook()) {
+        consumeMessageContext.getProps().put(MixAll.CONSUME_CONTEXT_TYPE, returnType.name());
+    }
+
+    if (null == status) {
+        log.warn("consumeMessage return null, Group: {} Msgs: {} MQ: {}",
+            ConsumeMessageConcurrentlyService.this.consumerGroup,
+            msgs,
+            messageQueue);
+        status = ConsumeConcurrentlyStatus.RECONSUME_LATER;
+    }
+
+    if (ConsumeMessageConcurrentlyService.this.defaultMQPushConsumerImpl.hasHook()) {
+        consumeMessageContext.setStatus(status.toString());
+        consumeMessageContext.setSuccess(ConsumeConcurrentlyStatus.CONSUME_SUCCESS == status);
+        ConsumeMessageConcurrentlyService.this.defaultMQPushConsumerImpl.executeHookAfter(consumeMessageContext);
+    }
+
+    ConsumeMessageConcurrentlyService.this.getConsumerStatsManager()
+        .incConsumeRT(ConsumeMessageConcurrentlyService.this.consumerGroup, messageQueue.getTopic(), consumeRT);
+
+    if (!processQueue.isDropped()) {
+        ConsumeMessageConcurrentlyService.this.processConsumeResult(status, context, this);
+    } else {
+        log.warn("processQueue is dropped without process consume result. messageQueue={}, msgs={}", messageQueue, msgs);
+    }
+}
+```
