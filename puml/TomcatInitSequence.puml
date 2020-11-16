@@ -1,9 +1,0 @@
-@startuml
-Server -> Service: init Service
-Service --> Engine: init Engine
-Service --> Executor: init Executor
-Service --> Connector: init Connector
-Connector --> ProtocolHandler: init ProtocolHandler
-ProtocolHandler --> EndPoint: init EndPoint
-
-@enduml
