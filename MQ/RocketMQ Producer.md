@@ -247,6 +247,7 @@ private TopicPublishInfo tryToFindTopicPublishInfo(final String topic) {
     TopicPublishInfo topicPublishInfo = this.topicPublishInfoTable.get(topic);
     if (null == topicPublishInfo || !topicPublishInfo.ok()) {
         this.topicPublishInfoTable.putIfAbsent(topic, new TopicPublishInfo());
+      	//第一次更新本地路由信息
         this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic);
         topicPublishInfo = this.topicPublishInfoTable.get(topic);
     }
@@ -254,6 +255,7 @@ private TopicPublishInfo tryToFindTopicPublishInfo(final String topic) {
     if (topicPublishInfo.isHaveTopicRouterInfo() || topicPublishInfo.ok()) {
         return topicPublishInfo;
     } else {
+      	//第二次更新本地路由信息，与第一次更新路由信息不同，该次会获取支持自动创建topic的broker信息
         this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic, true, this.defaultMQProducer);
         topicPublishInfo = this.topicPublishInfoTable.get(topic);
         return topicPublishInfo;
@@ -265,6 +267,7 @@ private TopicPublishInfo tryToFindTopicPublishInfo(final String topic) {
 
 1. 从topicPublishInfoTable Map中获取路由信息
 2. 如果路由信息在Map中不存在则调用updateTopicRouteInfoFromNameServer向NameSrv请求Topic路由信息并更新topicPublishInfoTable 
+3. 如果第一次更新没有获取到topic对应的路由信息则再更新，第二次的更新会获取默认的路由信息也就是那些支持自动创建topic的broker信息。如果broker支持自动创建topic则该broker就存在“TBW102”topic，所以只要对“TBW102”topic寻址就能找到支持自动创建topic的broker，然后发送消息就可以了
 
 ### 2. selectOneMessageQueue：负载均衡
 
