@@ -6,7 +6,12 @@ data: 2020-10-13 23:24:49
 
 **源码基于：4.7.1**
 
-## 用例
+RocketMQ的消费模式分为：
+
+1. 广播模式
+2. 集群模式
+
+## 广播模式用例
 
 ```java
 public class PushConsumer {
