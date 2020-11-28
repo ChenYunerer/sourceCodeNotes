@@ -391,6 +391,53 @@ this.brokerController.getTransactionalMessageService().deletePrepareMessage(resu
     return response;
 }
 ```
+### 删除Prepare消息
+
+由于rocket的commitlog都是追加式顺序写，所以这里所谓的删除也不是真正的删除，而是创建一个opmessage放入特定的topic从而标记该opmessage所映射的message的状态。
+
+```java
+TransactionalMessageServiceImpl.class
+
+@Override
+public boolean deletePrepareMessage(MessageExt msgExt) {
+    if (this.transactionalMessageBridge.putOpMessage(msgExt, TransactionalMessageUtil.REMOVETAG)) {
+        log.debug("Transaction op message write successfully. messageId={}, queueId={} msgExt:{}", msgExt.getMsgId(), msgExt.getQueueId(), msgExt);
+        return true;
+    } else {
+        log.error("Transaction op message write failed. messageId is {}, queueId is {}", msgExt.getMsgId(), msgExt.getQueueId());
+        return false;
+    }
+}
+```
+
+```java
+TransactionalMessageBridge.class
+  
+public boolean putOpMessage(MessageExt messageExt, String opType) {
+    MessageQueue messageQueue = new MessageQueue(messageExt.getTopic(),
+        this.brokerController.getBrokerConfig().getBrokerName(), messageExt.getQueueId());
+    if (TransactionalMessageUtil.REMOVETAG.equals(opType)) {
+        return addRemoveTagInTransactionOp(messageExt, messageQueue);
+    }
+    return true;
+}
+
+private boolean addRemoveTagInTransactionOp(MessageExt messageExt, MessageQueue messageQueue) {
+  			//构建一个message topic指定为：RMQ_SYS_TRANS_OP_HALF_TOPIC，tag指定为：d表示删除状态
+        Message message = new Message(TransactionalMessageUtil.buildOpTopic(), TransactionalMessageUtil.REMOVETAG,
+            String.valueOf(messageExt.getQueueOffset()).getBytes(TransactionalMessageUtil.charset));
+        writeOp(message, messageQueue);
+        return true;
+    }
+```
+
+### TransactionalMessageCheckService消息回查
+
+消息回查主要由TransactionalMessageCheckService来处理
+
+TransactionalMessageCheckService每隔默认时间60秒检测事务消息的状态，如果发现没有commit或是rollback则发起回查消息给producer，默认回查15次，如果15次回查还是无法得知事务状态，rocketmq默认回滚该消息。
+
+源码不跟踪了
 
 ## 个人总结
 
