@@ -23,6 +23,6 @@ HAClient：用于连接Master并上报自己的CommitLog的MaxOffset，接受Mas
 
 HAConnection：封装了MasterSlave的连接，包括WriteSocketService和ReadSocketService
 
-WriteSocketService：用于Master向Slave写数据
+WriteSocketService：用于Master向Slave写commitLog数据
 
 ReadSocketService：用于Master接受Slave的数据，比如接受Slave上报的Slave CommitLog Max Offset
