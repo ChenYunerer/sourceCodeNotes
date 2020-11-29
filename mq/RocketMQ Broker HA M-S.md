@@ -26,4 +26,3 @@ HAConnection：封装了MasterSlave的连接，包括WriteSocketService和ReadSo
 WriteSocketService：用于Master向Slave写数据
 
 ReadSocketService：用于Master接受Slave的数据，比如接受Slave上报的Slave CommitLog Max Offset
-
