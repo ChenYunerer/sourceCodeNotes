@@ -17,7 +17,7 @@ RocketMQ支持
 
 AcceptSocketService:：用于接受Slave的Socket连接，接收到一个连接则封装成HAConnection
 
-GroupTransferService：用于处理同步或是异步的处理
+GroupTransferService：用于处理同步等待Master-Slave数据同步
 
 HAClient：用于连接Master并上报自己的CommitLog的MaxOffset，接受Master同步过来的CommitLog数据
 
