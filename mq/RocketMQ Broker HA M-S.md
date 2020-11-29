@@ -13,39 +13,17 @@ RocketMQ支持
 
 同步与异步的差别就在于，broker是否要在同步slave到之后返回ack
 
-```java
-CommitLog.class
-  
-public void handleHA(AppendMessageResult result, PutMessageResult putMessageResult, MessageExt messageExt) {
-  	//判断当前broker是否是master节点，只有是master节点才做主从复制
-    if (BrokerRole.SYNC_MASTER == this.defaultMessageStore.getMessageStoreConfig().getBrokerRole()) {
-        HAService service = this.defaultMessageStore.getHaService();
-        if (messageExt.isWaitStoreMsgOK()) {
-            // Determine whether to wait
-            if (service.isSlaveOK(result.getWroteOffset() + result.getWroteBytes())) {
-                GroupCommitRequest request = new GroupCommitRequest(result.getWroteOffset() + result.getWroteBytes());
-                service.putRequest(request);
-                service.getWaitNotifyObject().wakeupAll();
-                PutMessageStatus replicaStatus = null;
-                try {
-                    replicaStatus = request.future().get(this.defaultMessageStore.getMessageStoreConfig().getSyncFlushTimeout(),
-                            TimeUnit.MILLISECONDS);
-                } catch (InterruptedException | ExecutionException | TimeoutException e) {
-                }
-                if (replicaStatus != PutMessageStatus.PUT_OK) {
-                    log.error("do sync transfer other node, wait return, but failed, topic: " + messageExt.getTopic() + " tags: "
-                        + messageExt.getTags() + " client address: " + messageExt.getBornHostNameString());
-                    putMessageResult.setPutMessageStatus(PutMessageStatus.FLUSH_SLAVE_TIMEOUT);
-                }
-            }
-            // Slave problem
-            else {
-                // Tell the producer, slave not available
-                putMessageResult.setPutMessageStatus(PutMessageStatus.SLAVE_NOT_AVAILABLE);
-            }
-        }
-    }
+![image-20201129110814900](RocketMQ Broker HA M-S.assets/image-20201129110814900.png)
 
-}
-```
+AcceptSocketService:：用于接受Slave的Socket连接，接收到一个连接则封装成HAConnection
+
+GroupTransferService：用于处理同步或是异步的处理
+
+HAClient：用于连接Master并上报自己的CommitLog的MaxOffset，接受Master同步过来的CommitLog数据
+
+HAConnection：封装了MasterSlave的连接，包括WriteSocketService和ReadSocketService
+
+WriteSocketService：用于Master向Slave写数据
+
+ReadSocketService：用于Master接受Slave的数据，比如接受Slave上报的Slave CommitLog Max Offset
 
