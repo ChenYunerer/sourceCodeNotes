@@ -11,7 +11,7 @@ data: 2020-10-13 23:25:28
 RocketMQ的顺序消息，需要producer和consumer配和处理：
 
 1. producer端：producer发送消息到**同一个broker**
-2. consumer端：只能由**一个consumer**来进行**单线程消费**
+2. consumer端：集群消费模式下，只能由**一个consumer**来进行**单线程消费**；广播消费模式下一个consumer只能**单线程**进行消费
 
 ## Example
 
