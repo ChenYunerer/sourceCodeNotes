@@ -1,5 +1,7 @@
 ---
 title: Mysql InnoDB
+tags: MySql Innodb
+categories: DataBase&Cache
 ---
 
 

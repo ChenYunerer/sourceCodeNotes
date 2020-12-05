@@ -1,5 +1,7 @@
 ---
 title: Netty EventExecutor选择器
+tags: NIO&Netty
+categories: NIO&Netty
 data: 2020-08-28 22:33:24
 ---
 # Netty EventExecutor选择器

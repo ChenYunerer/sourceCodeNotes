@@ -1,5 +1,7 @@
 ---
 title: Linux内核
+tags: Linux
+categories: Linux
 ---
 # Linux内核
 

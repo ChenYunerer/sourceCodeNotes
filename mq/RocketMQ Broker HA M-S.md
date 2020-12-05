@@ -1,5 +1,7 @@
 ---
 title: RocketMQ Broker HA M-S
+tags: RocketMQ
+categories: MQ
 data: 2020-10-13 23:25:28
 ---
 # RocketMQ Broker HA Master-Slave

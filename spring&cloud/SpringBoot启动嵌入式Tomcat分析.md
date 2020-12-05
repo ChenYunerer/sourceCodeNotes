@@ -1,5 +1,7 @@
 ---
 title: SpringBoot启动嵌入式Tomcat分析
+tags: Spring&SpringCloud
+categories: Spring&SpringCloud
 ---
 
 

@@ -1,5 +1,7 @@
 ---
 title: Tomcat启动分析2_catalina.sh
+tags: Tomcat
+categories: Tomcat
 ---
 
 

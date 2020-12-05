@@ -1,5 +1,7 @@
 ---
 title: CAP BASE理论
+tags: db&cache
+categories: db&cache
 ---
 # CAP
 

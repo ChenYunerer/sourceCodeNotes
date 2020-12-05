@@ -1,5 +1,7 @@
 ---
 title: Java SPI
+tags: Java基础
+categories: Java基础
 data: 2020-09-19 14:44:04
 ---
 # Java SPI

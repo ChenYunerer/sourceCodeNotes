@@ -1,5 +1,7 @@
 ---
 title: Tomcat启动分析1_startup.sh
+tags: Tomcat
+categories: Tomcat
 ---
 
 

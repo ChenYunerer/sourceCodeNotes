@@ -1,5 +1,7 @@
 ---
 title: Spring Cloud Discovery With Nacos
+tags: Spring&SpringCloud
+categories: Spring&SpringCloud
 ---
 
 

@@ -1,5 +1,7 @@
 ---
 title: Mybatis源码分析
+tags: Mybatis
+categories: Spring&SpringCloud
 ---
 
 

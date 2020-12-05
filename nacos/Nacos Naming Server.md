@@ -1,5 +1,7 @@
 ---
 title: Nacos Naming Server
+tags: Nacos
+categories: Nacos
 ---
 
 

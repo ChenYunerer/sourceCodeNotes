@@ -1,5 +1,7 @@
 ---
 title: Sentinel
+tags: Sentinel
+categories: Sentinel
 ---
 
 

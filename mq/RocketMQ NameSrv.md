@@ -1,5 +1,7 @@
 ---
 title: RocketMQ NameSrv
+tags: RocketMQ
+categories: MQ
 data: 2020-10-13 23:24:26
 ---
 # RocketMQ NameSrv
@@ -26,6 +28,7 @@ consumer可通过name srv获取topic对应的broker并获取数据
 NamesrvStartup.class
     
 public static NamesrvController createNamesrvController(String[] args) throws IOException, JoranException {
+  
     //PackageConflictDetect.detectFastjson();
     //通过org.apache.commons.cli包来对cmd的args进行解析
     Options options = ServerUtil.buildCommandlineOptions(new Options());

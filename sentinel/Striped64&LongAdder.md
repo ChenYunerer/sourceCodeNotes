@@ -1,5 +1,7 @@
 ---
 title: Striped64&LongAdder
+tags: Sentinel
+categories: Sentinel
 ---
 
 

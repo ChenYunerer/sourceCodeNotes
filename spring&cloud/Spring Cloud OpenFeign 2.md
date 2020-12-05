@@ -1,5 +1,7 @@
 ---
 title: Spring Cloud OpenFeign 2
+tags: Spring&SpringCloud
+categories: Spring&SpringCloud
 ---
 
 

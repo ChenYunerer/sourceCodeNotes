@@ -1,5 +1,7 @@
 ---
 title: Spring Bean Inject
+tags: Spring&SpringCloud
+categories: Spring&SpringCloud
 ---
 
 

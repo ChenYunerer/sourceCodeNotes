@@ -1,5 +1,7 @@
 ---
 title: Spring Cloud RefreshScope
+tags: Spring&SpringCloud
+categories: Spring&SpringCloud
 ---
 
 

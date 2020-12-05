@@ -1,5 +1,7 @@
 ---
 title: Dubbo服务暴露
+tags: Dubbo
+categories: Dubbo
 data: 2020-09-01 12:04:14
 ---
 # Dubbo服务暴露（以dubbo协议 netty服务为例）

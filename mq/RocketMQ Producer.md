@@ -1,5 +1,7 @@
 ---
 title: RocketMQ Producer
+tags: RocketMQ
+categories: MQ
 data: 2020-10-13 23:24:34
 ---
 # RocketMQ Producer
@@ -10,6 +12,7 @@ data: 2020-10-13 23:24:34
 
 ```java
 public class SyncProducer {
+  
 	public static void main(String[] args) throws Exception {
     	// 实例化消息生产者Producer
         DefaultMQProducer producer = new DefaultMQProducer("please_rename_unique_group_name");

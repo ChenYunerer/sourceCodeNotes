@@ -1,5 +1,7 @@
 ---
 title: RocketMQ Transaction Msg事务消息
+tags: RocketMQ
+categories: MQ
 data: 2020-10-13 23:25:28
 ---
 # RocketMQ Transaction Msg事务消息

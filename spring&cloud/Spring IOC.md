@@ -1,5 +1,7 @@
 ---
 title: Spring IOC
+tags: Spring&SpringCloud
+categories: Spring&SpringCloud
 ---
 
 

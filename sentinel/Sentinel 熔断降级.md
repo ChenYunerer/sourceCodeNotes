@@ -1,5 +1,7 @@
 ---
 title: Sentinel 熔断降级
+tags: Sentinel
+categories: Sentinel
 ---
 
 

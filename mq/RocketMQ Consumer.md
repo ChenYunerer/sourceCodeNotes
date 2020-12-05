@@ -1,6 +1,8 @@
 ---
 title: RocketMQ Consumer
 data: 2020-10-13 23:24:49
+tags: RocketMQ
+categories: MQ
 ---
 # RocketMQ Consumer
 

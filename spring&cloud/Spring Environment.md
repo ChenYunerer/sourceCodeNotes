@@ -1,5 +1,7 @@
 ---
 title: Spring Environment
+tags: Spring&SpringCloud
+categories: Spring&SpringCloud
 ---
 
 

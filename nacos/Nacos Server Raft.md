@@ -1,5 +1,7 @@
 ---
 title: Nacos Server Raft
+tags: Nacos
+categories: Nacos
 ---
 
 

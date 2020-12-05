@@ -1,5 +1,7 @@
 ---
 title: RocketMQ Schedule Msg
+tags: RocketMQ
+categories: MQ
 data: 2020-10-13 23:25:28
 ---
 # RocketMQ Schedule Msg延迟消息
