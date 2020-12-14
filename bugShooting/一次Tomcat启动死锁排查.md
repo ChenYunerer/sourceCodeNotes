@@ -219,7 +219,7 @@ protected void deployDirectory(ContextName cn, File dir) {
 
 ### 查看线程堆栈信息
 
-使用jstat查看线程堆栈信息提示：
+使用jstack查看线程堆栈信息提示：
 
 ```java
 Found one Java-level deadlock:
