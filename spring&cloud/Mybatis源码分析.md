@@ -52,7 +52,7 @@ addInterceptor方法往interceptors添加拦截器
 
 ### MapperXML解析
 
-对xml各个标签进行解析，最终构建MappedStatement由configuration维护：Map<String, MappedStatement> mappedStatements
+通过SqlSessionFactoryBean构建SqlSessionFactory，构建过程中通过XMLMapperBuilder对xml各个标签进行解析，最终构建MappedStatement由configuration维护：Map<String, MappedStatement> mappedStatements
 
 ```java
 public void parseStatementNode() {
