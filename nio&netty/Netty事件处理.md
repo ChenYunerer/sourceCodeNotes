@@ -1,5 +1,5 @@
 ---
-title: Netty事件处理、拆包
+title: Netty事件处理
 tags: NIO&Netty
 categories: NIO&Netty
 data: 2020-08-27 22:19:44
@@ -14,6 +14,7 @@ data: 2020-08-27 22:19:44
 NioEventLoop.class
 //NioEventLoop的run方法循环尝试处理nio事件
 //ParentGroup的NioEventLoop在启动的时候设置的InterestOps是SelectionKey.OP_ACCEPT
+//NioEventLoop不仅需要处理nio select还需要执行task
 @Override
 protected void run() {
     int selectCnt = 0;
@@ -21,6 +22,8 @@ protected void run() {
         try {
             int strategy;
             try {
+                //使用selectStrategy判断当前循环的策略(读取Nio select还是执行task)
+                //strategy > 0 的时候表示读取NIO select否则执行task任务
                 strategy = selectStrategy.calculateStrategy(selectNowSupplier, hasTasks());
                 switch (strategy) {
                 case SelectStrategy.CONTINUE:
@@ -118,6 +121,7 @@ protected void run() {
 
 1. NioEventLoop的run方法循环尝试处理nio事件
 2. ParentGroup的NioEventLoop在启动的时候设置的InterestOps是SelectionKey.OP_ACCEPT
+3. NioEventLoop不仅需要处理nio select还需要执行task
 
 ## processSelectedKeys
 
