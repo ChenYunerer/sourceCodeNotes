@@ -4,8 +4,6 @@ tags: Redis
 categories: DataBase&Cache
 ---
 
-
-
 # Redis
 
 ## 基本数据类型
